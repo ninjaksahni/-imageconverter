@@ -7,6 +7,8 @@ import hashlib
 import html
 import math
 
+from dataclasses import dataclass
+
 import streamlit as st
 
 from converter import (
@@ -18,12 +20,57 @@ from converter import (
     estimate_batch,
     format_bytes,
     make_thumbnail,
-    partition_uploads,
+    validate_image,
 )
 
 MAX_FILES = 100
 CARDS_PER_ROW = 6
 CARDS_PER_PAGE = 24
+
+
+@dataclass
+class PreviewFile:
+    file_id: str
+    name: str
+    data: bytes
+    estimate: FileEstimate | None = None
+    unsupported_error: str | None = None
+
+    @property
+    def size(self) -> int:
+        return len(self.data)
+
+
+def init_batch_state() -> None:
+    if "batch_files" not in st.session_state:
+        st.session_state.batch_files = {}
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
+
+
+def make_file_id(data: bytes) -> str:
+    return hashlib.md5(data).hexdigest()
+
+
+def merge_new_uploads(uploaded: list) -> bool:
+    changed = False
+    for uploaded_file in uploaded:
+        data = uploaded_file.getvalue()
+        file_id = make_file_id(data)
+        if file_id not in st.session_state.batch_files:
+            st.session_state.batch_files[file_id] = {
+                "name": uploaded_file.name,
+                "data": data,
+            }
+            changed = True
+    return changed
+
+
+def remove_batch_file(file_id: str) -> None:
+    st.session_state.batch_files.pop(file_id, None)
+    st.session_state.pop("results", None)
+    st.session_state.pop("settings", None)
+
 
 st.set_page_config(
     page_title="Image to WebP Converter",
@@ -31,6 +78,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+init_batch_state()
 
 st.markdown(
     """
@@ -48,6 +97,11 @@ st.markdown(
     [data-testid="stFileUploader"] section:hover {
         border-color: #818cf8 !important;
         background: #f5f7ff !important;
+    }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderFile"],
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"],
+    [data-testid="stFileUploader"] ul {
+        display: none !important;
     }
     .app-hero {
         background: linear-gradient(135deg, #4338ca 0%, #7c3aed 55%, #a855f7 100%);
@@ -210,6 +264,44 @@ st.markdown(
     .badge-ok { background: #dcfce7; color: #166534; }
     .badge-fail { background: #fee2e2; color: #991b1b; }
     .badge-pending { background: #e0e7ff; color: #3730a3; }
+    .badge-converting {
+        background: #dbeafe;
+        color: #1d4ed8;
+        animation: badge-pulse 1s ease-in-out infinite;
+    }
+    @keyframes badge-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.55; }
+    }
+    .preview-anchor { display: none; }
+    [data-testid="column"]:has(.preview-anchor) {
+        position: relative;
+    }
+    [data-testid="column"]:has(.preview-anchor) [data-testid="stButton"] {
+        position: absolute;
+        top: 0.3rem;
+        right: 0.3rem;
+        z-index: 3;
+        width: auto !important;
+    }
+    [data-testid="column"]:has(.preview-anchor) [data-testid="stButton"] button {
+        width: 1.5rem !important;
+        height: 1.5rem !important;
+        min-height: 1.5rem !important;
+        padding: 0 !important;
+        border-radius: 999px !important;
+        font-size: 0.8rem !important;
+        line-height: 1 !important;
+        background: rgba(255, 255, 255, 0.95) !important;
+        border: 1px solid #e2e8f0 !important;
+        color: #64748b !important;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+    [data-testid="column"]:has(.preview-anchor) [data-testid="stButton"] button:hover {
+        background: #fee2e2 !important;
+        border-color: #fecaca !important;
+        color: #b91c1c !important;
+    }
     .thumb-frame {
         width: 96px;
         height: 96px;
@@ -334,7 +426,7 @@ def render_estimate_panel(estimate: BatchEstimate, *, title: str = "Estimated sa
 
 @st.cache_data(show_spinner=False)
 def cached_batch_estimate(
-    settings_key: tuple[tuple[tuple[str, int], ...], int, int],
+    settings_key: tuple[tuple[str, ...], int, int],
     file_data: tuple[tuple[str, bytes], ...],
 ) -> tuple[tuple[str, int, int, float], ...]:
     _, quality, resize_pct = settings_key
@@ -353,21 +445,64 @@ def cached_thumbnail(file_digest: str, file_bytes: bytes) -> bytes | None:
 
 
 def load_estimates(
-    upload_key: tuple[tuple[str, int], ...],
+    file_ids: tuple[str, ...],
     quality: int,
     resize_pct: int,
     file_data: list[tuple[str, bytes]],
 ) -> tuple[BatchEstimate, dict[str, FileEstimate]]:
     rows = cached_batch_estimate(
-        (upload_key, quality, resize_pct),
+        (file_ids, quality, resize_pct),
         tuple(file_data),
     )
     files = [
         FileEstimate(name, original, webp)
         for name, original, webp, _ in rows
     ]
-    by_name = {item.name: item for item in files}
-    return BatchEstimate(files=files), by_name
+    by_id = {
+        file_id: FileEstimate(name, original, webp)
+        for file_id, (name, original, webp, _) in zip(file_ids, rows)
+    }
+    return BatchEstimate(files=files), by_id
+
+
+def get_preview_files(
+    quality: int,
+    resize_pct: int,
+) -> tuple[list[PreviewFile], BatchEstimate | None]:
+    stored = st.session_state.batch_files
+    if not stored:
+        return [], None
+
+    supported_items: list[tuple[str, str, bytes]] = []
+    preview_by_id: dict[str, PreviewFile] = {}
+
+    for file_id, info in stored.items():
+        error = validate_image(info["data"], info["name"])
+        if error:
+            preview_by_id[file_id] = PreviewFile(
+                file_id=file_id,
+                name=info["name"],
+                data=info["data"],
+                unsupported_error=error,
+            )
+        else:
+            supported_items.append((file_id, info["name"], info["data"]))
+
+    estimate = None
+    if supported_items:
+        file_ids = tuple(file_id for file_id, _, _ in supported_items)
+        file_data = [(name, data) for _, name, data in supported_items]
+        estimate, estimates_by_id = load_estimates(file_ids, quality, resize_pct, file_data)
+        for file_id, name, data in supported_items:
+            preview_by_id[file_id] = PreviewFile(
+                file_id=file_id,
+                name=name,
+                data=data,
+                estimate=estimates_by_id.get(file_id),
+            )
+
+    previews = [preview_by_id[file_id] for file_id in stored]
+    return previews, estimate
 
 
 def file_estimate_meta(item: FileEstimate | None) -> str:
@@ -415,52 +550,72 @@ def _compare_html(before: bytes | None, after: bytes | None) -> str:
     )
 
 
+def status_badge_html(status: str, *, unsupported: bool = False) -> str:
+    if unsupported:
+        return '<span class="badge badge-unsupported">Unsupported</span>'
+    label, badge_class = {
+        "queued": ("Queued", "badge-pending"),
+        "converting": ("Converting…", "badge-converting"),
+        "done": ("Done", "badge-ok"),
+        "failed": ("Failed", "badge-fail"),
+    }.get(status, ("Queued", "badge-pending"))
+    return f'<span class="badge {badge_class}">{label}</span>'
+
+
+def preview_card_html(preview: PreviewFile, status: str) -> str:
+    digest = make_file_id(preview.data)
+    thumb = cached_thumbnail(digest, preview.data)
+    safe_name = html.escape(preview.name)
+
+    if preview.unsupported_error:
+        return f"""
+        <div class="thumb-card unsupported">
+            {status_badge_html(status, unsupported=True)}
+            <div class="thumb-frame"><span style="color:#d97706;">✕</span></div>
+            <div class="filename" title="{safe_name}">{html.escape(truncate_name(preview.name))}</div>
+            <div class="meta">{html.escape(preview.unsupported_error)}</div>
+        </div>
+        """
+
+    estimate_html = file_estimate_meta(preview.estimate)
+    card_class = "thumb-card failed" if status == "failed" else "thumb-card"
+    return f"""
+    <div class="{card_class}">
+        {status_badge_html(status)}
+        {_thumb_html(thumb)}
+        <div class="filename" title="{safe_name}">{html.escape(truncate_name(preview.name))}</div>
+        <div class="meta">{estimate_html}</div>
+    </div>
+    """
+
+
 def render_upload_grid(
-    files: list,
+    files: list[PreviewFile],
     page: int,
-    estimates_by_name: dict[str, FileEstimate],
-    unsupported_by_name: dict[str, str],
+    *,
+    status_map: dict[str, str] | None = None,
+    show_remove: bool = True,
 ) -> None:
     start = page * CARDS_PER_PAGE
     chunk = files[start : start + CARDS_PER_PAGE]
+    statuses = status_map or {}
 
     for row_start in range(0, len(chunk), CARDS_PER_ROW):
         cols = st.columns(CARDS_PER_ROW)
         row_items = chunk[row_start : row_start + CARDS_PER_ROW]
-        for col, uploaded in zip(cols, row_items):
+        for col, preview in zip(cols, row_items):
             with col:
-                file_bytes = uploaded.getvalue()
-                digest = hashlib.md5(file_bytes).hexdigest()
-                thumb = cached_thumbnail(digest, file_bytes)
-                safe_name = html.escape(uploaded.name)
-                unsupported_error = unsupported_by_name.get(uploaded.name)
-                if unsupported_error:
-                    st.markdown(
-                        f"""
-                        <div class="thumb-card unsupported">
-                            <span class="badge badge-unsupported">Unsupported</span>
-                            <div class="thumb-frame"><span style="color:#d97706;">✕</span></div>
-                            <div class="filename" title="{safe_name}">{html.escape(truncate_name(uploaded.name))}</div>
-                            <div class="meta">{html.escape(unsupported_error)}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                    continue
+                if preview.unsupported_error:
+                    status = "failed"
+                else:
+                    status = statuses.get(preview.file_id, "queued")
 
-                estimate = estimates_by_name.get(uploaded.name)
-                estimate_html = file_estimate_meta(estimate)
-                st.markdown(
-                    f"""
-                    <div class="thumb-card">
-                        <span class="badge badge-pending">Queued</span>
-                        {_thumb_html(thumb)}
-                        <div class="filename" title="{safe_name}">{html.escape(truncate_name(uploaded.name))}</div>
-                        <div class="meta">{estimate_html}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                st.markdown('<div class="preview-anchor"></div>', unsafe_allow_html=True)
+                if show_remove:
+                    if st.button("✕", key=f"remove_{preview.file_id}", help="Remove file"):
+                        remove_batch_file(preview.file_id)
+                        st.rerun()
+                st.markdown(preview_card_html(preview, status), unsafe_allow_html=True)
 
 
 def render_result_grid(results: list, page: int) -> None:
@@ -547,26 +702,33 @@ with st.sidebar:
         help="Scale output dimensions. 100% keeps the original size.",
     )
 
-uploaded_files = st.file_uploader(
+new_uploads = st.file_uploader(
     "Drop images here or click to browse",
     type=None,
     accept_multiple_files=True,
+    key=f"uploader_{st.session_state.uploader_key}",
 )
 
-if uploaded_files and len(uploaded_files) > MAX_FILES:
-    st.error(f"Please upload at most {MAX_FILES} files. Showing the first {MAX_FILES}.")
-    uploaded_files = uploaded_files[:MAX_FILES]
-
-if uploaded_files:
-    upload_key = tuple((f.name, f.size) for f in uploaded_files)
-    if st.session_state.get("upload_key") != upload_key:
+if new_uploads:
+    if merge_new_uploads(new_uploads):
+        st.session_state.uploader_key += 1
         st.session_state.pop("results", None)
         st.session_state.pop("settings", None)
-        st.session_state["upload_key"] = upload_key
+        st.rerun()
 
-    file_data = [(f.name, f.getvalue()) for f in uploaded_files]
-    supported_files, unsupported_files = partition_uploads(file_data)
-    unsupported_by_name = dict(unsupported_files)
+preview_files, estimate = get_preview_files(quality, resize_pct) if st.session_state.batch_files else ([], None)
+
+if len(preview_files) > MAX_FILES:
+    st.error(f"Please upload at most {MAX_FILES} files. Remove some files from the preview below.")
+
+if preview_files:
+    supported_previews = [preview for preview in preview_files if not preview.unsupported_error]
+    supported_files = [(preview.name, preview.data) for preview in supported_previews]
+    unsupported_files = [
+        (preview.name, preview.unsupported_error)
+        for preview in preview_files
+        if preview.unsupported_error
+    ]
 
     if unsupported_files and supported_files:
         names = ", ".join(name for name, _ in unsupported_files[:5])
@@ -583,18 +745,12 @@ if uploaded_files:
             "Please upload valid image files (e.g. JPEG, PNG, GIF, WebP, TIFF, BMP, HEIC)."
         )
 
-    estimate, estimates_by_name = (
-        load_estimates(upload_key, quality, resize_pct, supported_files)
-        if supported_files
-        else (None, {})
-    )
-
     with st.sidebar:
         st.markdown("### 📊 Size estimate")
         if estimate:
             render_estimate_panel(estimate)
 
-    render_settings_chips(quality, resize_pct, len(uploaded_files))
+    render_settings_chips(quality, resize_pct, len(preview_files))
 
     show_convert_prompt = "results" not in st.session_state and bool(supported_files)
 
@@ -611,28 +767,51 @@ if uploaded_files:
             "Convert to WebP",
             type="primary",
             use_container_width=True,
-            disabled=not supported_files,
+            disabled=not supported_files or len(preview_files) > MAX_FILES,
         )
 
-    if convert_clicked and supported_files:
+    if convert_clicked and supported_previews:
+        status_map = {preview.file_id: "queued" for preview in supported_previews}
+        upload_page = st.session_state.get("upload_preview_page", 0)
+        preview_slot = st.empty()
         progress = st.progress(0, text="Converting images…")
         used_names: set[str] = set()
         results = []
-        for idx, (name, data) in enumerate(supported_files):
+
+        def refresh_live_preview() -> None:
+            with preview_slot.container():
+                st.markdown('<div class="section-title">Upload preview</div>', unsafe_allow_html=True)
+                render_upload_grid(
+                    preview_files,
+                    upload_page,
+                    status_map=status_map,
+                    show_remove=False,
+                )
+
+        refresh_live_preview()
+
+        for idx, preview in enumerate(supported_previews):
+            status_map[preview.file_id] = "converting"
+            refresh_live_preview()
+
             results.append(
                 convert_image(
-                    data,
-                    name,
+                    preview.data,
+                    preview.name,
                     quality=quality,
                     resize_pct=resize_pct,
                     used_names=used_names,
                 )
             )
+            status_map[preview.file_id] = "done" if results[-1].success else "failed"
+            refresh_live_preview()
             progress.progress(
-                (idx + 1) / len(supported_files),
-                text=f"Converting {idx + 1} / {len(supported_files)}…",
+                (idx + 1) / len(supported_previews),
+                text=f"Converting {idx + 1} / {len(supported_previews)}…",
             )
+
         progress.empty()
+        preview_slot.empty()
         st.session_state["results"] = results
         st.session_state["settings"] = {"quality": quality, "resize_pct": resize_pct}
 
@@ -712,12 +891,16 @@ if uploaded_files:
                 )
 
         st.markdown('<div class="section-title">Upload preview</div>', unsafe_allow_html=True)
-        page = page_selector(len(uploaded_files), key="upload_page")
-        render_upload_grid(uploaded_files, page, estimates_by_name, unsupported_by_name)
+        upload_page = page_selector(len(preview_files), key="upload_page")
+        st.session_state["upload_preview_page"] = upload_page
+        render_upload_grid(
+            preview_files,
+            upload_page,
+            show_remove=True,
+        )
 else:
     st.session_state.pop("results", None)
     st.session_state.pop("settings", None)
-    st.session_state.pop("upload_key", None)
 
     st.markdown(
         """
