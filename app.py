@@ -72,6 +72,14 @@ def remove_batch_file(file_id: str) -> None:
     st.session_state.pop("settings", None)
 
 
+def clear_all_files() -> None:
+    st.session_state.batch_files = {}
+    st.session_state.uploader_key += 1
+    st.session_state.pop("results", None)
+    st.session_state.pop("settings", None)
+    st.session_state.pop("upload_preview_page", None)
+
+
 st.set_page_config(
     page_title="Image to WebP Converter",
     page_icon="🖼️",
@@ -750,7 +758,16 @@ if preview_files:
         if estimate:
             render_estimate_panel(estimate)
 
-    render_settings_chips(quality, resize_pct, len(preview_files))
+    chip_col, clear_col = st.columns([5, 1])
+    with chip_col:
+        render_settings_chips(quality, resize_pct, len(preview_files))
+    with clear_col:
+        st.button(
+            "Clear all",
+            use_container_width=True,
+            help="Remove all uploaded files and reset",
+            on_click=clear_all_files,
+        )
 
     show_convert_prompt = "results" not in st.session_state and bool(supported_files)
 
@@ -851,6 +868,7 @@ if preview_files:
                     mime="application/zip",
                     type="primary",
                     use_container_width=True,
+                    on_click=clear_all_files,
                 )
 
         if failed:
