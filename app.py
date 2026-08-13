@@ -102,7 +102,7 @@ def init_batch_state() -> None:
         "grid_filter": "all",
         "clear_after_download": False,
         "download_ready": False,
-        "grid_view_mode": "grid",
+        "grid_view_mode": "list",
         "sq_lossless": False,
         "sq_strip_metadata": False,
     }
@@ -651,7 +651,7 @@ def render_thumbnail_grid(
                     )
 
                     if result and result.success and not read_only:
-                        st.markdown('<div class="card-actions">', unsafe_allow_html=True)
+                        st.markdown('<div class="card-actions-anchor"></div>', unsafe_allow_html=True)
                         a0, a1, a2, a3 = st.columns(4)
                         with a0:
                             if st.button(
@@ -691,7 +691,6 @@ def render_thumbnail_grid(
                                 excluded.discard(preview.file_id)
                             else:
                                 excluded.add(preview.file_id)
-                        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_list_row_actions(
@@ -706,13 +705,13 @@ def render_list_row_actions(
     excluded = st.session_state.excluded_zip_ids
     st.markdown('<div class="list-actions-anchor"></div>', unsafe_allow_html=True)
     if result and result.success:
-        c1, c2, c3, c4, c5 = st.columns([1.1, 0.9, 1, 1, 0.55])
+        c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
-            if st.button("Compare", key=f"lpv_{preview.file_id}_{page}", use_container_width=True):
+            if st.button("👁", key=f"lpv_{preview.file_id}_{page}", help="Compare", use_container_width=True):
                 show_compare_dialog(result)
         with c2:
             st.download_button(
-                "DL",
+                "↓",
                 data=result.webp_data,
                 file_name=basename_from_relative(result.webp_name),
                 mime="image/webp",
@@ -721,7 +720,7 @@ def render_list_row_actions(
                 use_container_width=True,
             )
         with c3:
-            if st.button("Retry", key=f"lrc_{preview.file_id}_{page}", use_container_width=True):
+            if st.button("↻", key=f"lrc_{preview.file_id}_{page}", help="Re-convert", use_container_width=True):
                 reconvert_file(preview.file_id, quality, resize_pct, target_kb)
                 st.rerun()
         with c4:
@@ -729,6 +728,7 @@ def render_list_row_actions(
                 "ZIP",
                 value=preview.file_id not in excluded,
                 key=f"lzip_{preview.file_id}_{page}",
+                label_visibility="collapsed",
             )
             if include:
                 excluded.discard(preview.file_id)

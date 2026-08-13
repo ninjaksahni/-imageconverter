@@ -455,19 +455,39 @@ section.stMain div[data-testid="stVerticalBlock"]:has(> .stElementContainer .gri
 }}
 .thumb-frame img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
 
-.card-actions {{
-    margin-top: 0.15rem; padding-top: 0.35rem;
-    border-top: 1px solid {BORDER};
+.card-actions-anchor {{ display: none; }}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) {{
+    margin-top: 0.15rem !important; padding-top: 0.35rem !important;
+    border-top: 1px solid {BORDER}; align-items: center !important;
 }}
-.card-actions [data-testid="column"] {{ padding: 0 0.1rem !important; }}
-.card-actions button, .card-actions [data-testid="stDownloadButton"] button {{
-    font-size: 0.62rem !important; padding: 0.15rem 0.2rem !important;
-    min-height: 1.55rem !important; font-family: 'IBM Plex Mono', monospace !important;
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="column"] {{
+    padding: 0 0.1rem !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stButton"] button,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stDownloadButton"] button {{
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    font-size: 0.72rem !important; padding: 0 !important;
+    min-height: 2rem !important; height: 2rem !important; width: 100% !important;
+    font-family: 'IBM Plex Mono', monospace !important;
     background: {BG_DEEP} !important; border: 1px solid {BORDER} !important;
-    color: {TEXT_MUTED} !important;
+    color: {TEXT_MUTED} !important; overflow: hidden !important;
 }}
-.card-actions button:hover, .card-actions [data-testid="stDownloadButton"] button:hover {{
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stButton"] button:hover,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stDownloadButton"] button:hover {{
     border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stButton"] button > div,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stDownloadButton"] button > div,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stButton"] button p,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stDownloadButton"] button p,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stButton"] button span,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) [data-testid="stDownloadButton"] button span {{
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    text-align: center !important; line-height: 1 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:has([class*="st-key-pv_"]) .element-container {{
+    margin: 0 !important; padding: 0 !important;
 }}
 [data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:first-of-type {{
     margin-bottom: -0.25rem !important;
@@ -795,14 +815,28 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     white-space: nowrap; line-height: 1.4;
 }}
 .list-actions-anchor {{ display: none; }}
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stHorizontalBlock"] {{
+    align-items: center !important; gap: 0.15rem !important;
+}}
 [data-testid="column"]:has(.list-actions-anchor) [data-testid="stButton"] button,
 [data-testid="column"]:has(.list-actions-anchor) [data-testid="stDownloadButton"] button {{
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.56rem !important; font-weight: 600 !important;
-    letter-spacing: 0.04em !important; text-transform: uppercase !important;
-    min-height: 1.85rem !important; padding: 0.2rem 0.35rem !important;
+    font-size: 0.72rem !important; font-weight: 600 !important;
+    min-height: 2rem !important; height: 2rem !important; width: 100% !important;
+    padding: 0 !important; overflow: hidden !important;
     background: {BG_DEEP} !important; border: 1px solid {BORDER} !important;
     color: {TEXT_MUTED} !important;
+}}
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stButton"] button > div,
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stDownloadButton"] button > div,
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stButton"] button p,
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stDownloadButton"] button p,
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stButton"] button span,
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stDownloadButton"] button span {{
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    text-align: center !important; line-height: 1 !important;
 }}
 [data-testid="column"]:has(.list-actions-anchor) [data-testid="stButton"] button:hover,
 [data-testid="column"]:has(.list-actions-anchor) [data-testid="stDownloadButton"] button:hover {{
@@ -812,6 +846,9 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 0.56rem !important; font-weight: 600 !important;
     text-transform: uppercase !important; color: {TEXT_MUTED} !important;
+}}
+[data-testid="column"]:has(.list-actions-anchor) .element-container {{
+    margin: 0 !important; padding: 0 !important;
 }}
 .list-row {{
     display: grid; grid-template-columns: 52px 1fr auto auto;
