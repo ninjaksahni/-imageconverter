@@ -888,24 +888,19 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     padding: 0.35rem; text-align: center; min-height: 120px;
 }}
 .compare-frame img {{ max-width: 100%; max-height: 220px; object-fit: contain; }}
-.compare-img-fit-anchor + [data-testid="stVerticalBlock"] [data-testid="stImage"] img,
-[data-testid="stDialog"] .compare-img-fit-anchor ~ * [data-testid="stImage"] img {{
-    max-height: 72vh !important;
-    width: 100% !important;
-    object-fit: contain !important;
-    image-rendering: auto !important;
+.compare-loupe-wrap {{
+    position: relative; width: 100%; overflow: hidden;
+    border: 1px solid {BORDER}; border-radius: 2px; background: #0a0c0f;
+    cursor: crosshair;
 }}
-.compare-img-full-anchor ~ [data-testid="stVerticalBlock"] [data-testid="stImage"] img,
-[data-testid="stDialog"] [data-testid="stImage"] img {{
-    max-height: none !important;
-    width: auto !important;
-    max-width: 100% !important;
-    object-fit: none !important;
-    image-rendering: -webkit-optimize-contrast !important;
+.compare-loupe-img {{
+    display: block; width: 100%; height: auto; user-select: none;
 }}
-[data-testid="stDialog"] [data-testid="stImage"] {{
-    overflow: auto !important;
-    max-height: 75vh !important;
+.compare-loupe-glass {{
+    display: none; position: absolute; width: 152px; height: 152px;
+    border: 2px solid {GREEN}; border-radius: 50%; pointer-events: none;
+    background-repeat: no-repeat; background-color: {BG_DEEP};
+    box-shadow: 0 0 10px rgba(0, 200, 83, 0.25); z-index: 2;
 }}
 .compare-label {{
     font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};

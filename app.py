@@ -6,12 +6,15 @@ import base64
 import hashlib
 import html
 import math
+import re
+from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from converter import (
     DEFAULT_QUALITY,
@@ -500,38 +503,247 @@ def _compare_original_bytes(result: ConversionResult) -> bytes | None:
     return read_bytes(info)
 
 
+COMPARE_LOUPE_ZOOM = 5
+COMPARE_LOUPE_SIZE = 152
+COMPARE_LOUPE_MIN = 2
+COMPARE_LOUPE_MAX = 12
+
+
+def _image_data_uri(data: bytes) -> str:
+    from PIL import Image
+
+    with Image.open(BytesIO(data)) as image:
+        image.load()
+        fmt = (image.format or "PNG").upper()
+    mime_map = {
+        "JPEG": "image/jpeg",
+        "JPG": "image/jpeg",
+        "PNG": "image/png",
+        "GIF": "image/gif",
+        "WEBP": "image/webp",
+    }
+    mime = mime_map.get(fmt, "image/png")
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _compare_loupe_height(data: bytes, *, column_width: int = 380) -> int:
+    from PIL import Image
+
+    with Image.open(BytesIO(data)) as image:
+        width, height = image.size
+    if width <= 0:
+        return 320
+    display_height = int(column_width * height / width)
+    return min(max(display_height + 20, 160), 720)
+
+
+def _compare_view_height(original: bytes, webp: bytes) -> int:
+    return max(_compare_loupe_height(original), _compare_loupe_height(webp)) + 72
+
+
+def render_sync_compare_view(
+    original_bytes: bytes,
+    webp_bytes: bytes,
+    *,
+    orig_label: str,
+    webp_label: str,
+    element_id: str,
+) -> None:
+    orig_uri = _image_data_uri(original_bytes)
+    webp_uri = _image_data_uri(webp_bytes)
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", element_id)
+    height = _compare_view_height(original_bytes, webp_bytes)
+    components.html(
+        f"""
+        <style>
+        .compare-sync-root {{
+            font-family: 'IBM Plex Mono', monospace; color: #8b939e;
+        }}
+        .compare-sync-hint {{
+            font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #8b939e; margin-bottom: 0.45rem;
+        }}
+        .compare-sync-panels {{
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;
+        }}
+        .compare-panel-title {{
+            font-size: 0.62rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.1em; color: #00d4ff; margin-bottom: 0.35rem;
+        }}
+        .compare-loupe-wrap {{
+            position: relative; width: 100%; overflow: hidden;
+            border: 1px solid #3d4450; border-radius: 2px; background: #0a0c0f;
+            cursor: crosshair;
+        }}
+        .compare-loupe-img {{
+            display: block; width: 100%; height: auto; user-select: none;
+        }}
+        .compare-loupe-glass {{
+            display: none; position: absolute; width: {COMPARE_LOUPE_SIZE}px; height: {COMPARE_LOUPE_SIZE}px;
+            border: 2px solid #00c853; border-radius: 50%; pointer-events: none; z-index: 2;
+            background-repeat: no-repeat; background-color: #12151a;
+            box-shadow: 0 0 10px rgba(0, 200, 83, 0.25);
+        }}
+        .compare-mag-badge {{
+            display: none; position: absolute; z-index: 3; pointer-events: none;
+            font-size: 0.58rem; font-weight: 700; letter-spacing: 0.06em;
+            color: #00c853; background: rgba(18, 21, 26, 0.92);
+            border: 1px solid #00c853; border-radius: 2px; padding: 0.12rem 0.35rem;
+            white-space: nowrap;
+        }}
+        .compare-panel-label {{
+            font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #8b939e; margin-top: 0.35rem;
+        }}
+        </style>
+        <div class="compare-sync-root" id="root-{safe_id}">
+            <div class="compare-sync-hint">Scroll to zoom · hover to compare</div>
+            <div class="compare-sync-panels" id="panels-{safe_id}">
+                <div class="compare-panel">
+                    <div class="compare-panel-title">Original</div>
+                    <div class="compare-loupe-wrap" data-side="orig">
+                        <img class="compare-loupe-img" src="{orig_uri}" alt="" />
+                        <div class="compare-loupe-glass"></div>
+                        <div class="compare-mag-badge"></div>
+                    </div>
+                    <div class="compare-panel-label">{html.escape(orig_label)}</div>
+                </div>
+                <div class="compare-panel">
+                    <div class="compare-panel-title">WebP output</div>
+                    <div class="compare-loupe-wrap" data-side="webp">
+                        <img class="compare-loupe-img" src="{webp_uri}" alt="" />
+                        <div class="compare-loupe-glass"></div>
+                        <div class="compare-mag-badge"></div>
+                    </div>
+                    <div class="compare-panel-label">{html.escape(webp_label)}</div>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function () {{
+            const LOUPE = {COMPARE_LOUPE_SIZE};
+            const MIN_ZOOM = {COMPARE_LOUPE_MIN};
+            const MAX_ZOOM = {COMPARE_LOUPE_MAX};
+            let zoom = {COMPARE_LOUPE_ZOOM};
+            let active = false;
+            let ratioX = 0.5;
+            let ratioY = 0.5;
+
+            const panelsRoot = document.getElementById("panels-{safe_id}");
+            if (!panelsRoot) return;
+
+            const panels = Array.from(panelsRoot.querySelectorAll(".compare-loupe-wrap")).map((wrap) => ({{
+                wrap,
+                img: wrap.querySelector(".compare-loupe-img"),
+                glass: wrap.querySelector(".compare-loupe-glass"),
+                badge: wrap.querySelector(".compare-mag-badge"),
+            }}));
+
+            function clamp(v, lo, hi) {{ return Math.max(lo, Math.min(hi, v)); }}
+
+            function positionGlass(panel, rx, ry) {{
+                const {{ wrap, img, glass, badge }} = panel;
+                const rect = img.getBoundingClientRect();
+                const wrapRect = wrap.getBoundingClientRect();
+                const x = rx * rect.width;
+                const y = ry * rect.height;
+                const imgLeft = rect.left - wrapRect.left;
+                const imgTop = rect.top - wrapRect.top;
+                const gw = LOUPE;
+                const gh = LOUPE;
+                let left = imgLeft + x - gw / 2;
+                let top = imgTop + y - gh / 2;
+                left = clamp(left, imgLeft, imgLeft + rect.width - gw);
+                top = clamp(top, imgTop, imgTop + rect.height - gh);
+                glass.style.left = left + "px";
+                glass.style.top = top + "px";
+                const bgW = rect.width * zoom;
+                const bgH = rect.height * zoom;
+                glass.style.backgroundImage = "url(" + img.src + ")";
+                glass.style.backgroundSize = bgW + "px " + bgH + "px";
+                glass.style.backgroundPosition =
+                    (-(rx * bgW - gw / 2)) + "px " + (-(ry * bgH - gh / 2)) + "px";
+                badge.textContent = zoom.toFixed(1).replace(/\\.0$/, "") + "×";
+                badge.style.left = (left + gw / 2) + "px";
+                badge.style.top = Math.max(4, top - 22) + "px";
+                badge.style.transform = "translateX(-50%)";
+            }}
+
+            function showLoupes(rx, ry) {{
+                ratioX = rx;
+                ratioY = ry;
+                active = true;
+                panels.forEach((panel) => {{
+                    panel.glass.style.display = "block";
+                    panel.badge.style.display = "block";
+                    positionGlass(panel, rx, ry);
+                }});
+            }}
+
+            function hideLoupes() {{
+                active = false;
+                panels.forEach((panel) => {{
+                    panel.glass.style.display = "none";
+                    panel.badge.style.display = "none";
+                }});
+            }}
+
+            function refreshLoupes() {{
+                if (active) showLoupes(ratioX, ratioY);
+            }}
+
+            function hitImage(e) {{
+                for (const panel of panels) {{
+                    const rect = panel.img.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    if (x >= 0 && y >= 0 && x <= rect.width && y <= rect.height) {{
+                        return {{ rx: x / rect.width, ry: y / rect.height }};
+                    }}
+                }}
+                return null;
+            }}
+
+            panelsRoot.addEventListener("mousemove", (e) => {{
+                const hit = hitImage(e);
+                if (hit) showLoupes(hit.rx, hit.ry);
+                else hideLoupes();
+            }});
+            panelsRoot.addEventListener("mouseleave", hideLoupes);
+
+            panelsRoot.addEventListener("wheel", (e) => {{
+                e.preventDefault();
+                const step = e.deltaY < 0 ? 0.5 : -0.5;
+                zoom = clamp(Math.round((zoom + step) * 2) / 2, MIN_ZOOM, MAX_ZOOM);
+                const hint = document.querySelector("#root-{safe_id} .compare-sync-hint");
+                if (hint) hint.textContent = "Scroll to zoom · " + zoom + "× active";
+                refreshLoupes();
+            }}, {{ passive: false }});
+
+            panels.forEach((panel) => {{
+                panel.img.addEventListener("load", refreshLoupes);
+            }});
+        }})();
+        </script>
+        """,
+        height=height,
+    )
+
+
 @st.dialog("Compare — Before / After", width="large")
 def show_compare_dialog(result: ConversionResult) -> None:
     safe_path = html.escape(result.relative_path)
     savings = f"{result.savings_pct:.1f}%" if result.savings_pct is not None else "—"
     mode = "Lossless" if st.session_state.get("sq_lossless") else f"Q{result.quality_used}"
     original_bytes = _compare_original_bytes(result)
-    fit_width = st.radio(
-        "Display",
-        ["Fit width", "Full size"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key=f"compare_view_{result.file_id}",
-    )
-    full_size = fit_width == "Full size"
-    img_cls = "compare-img-full" if full_size else "compare-img-fit"
-    st.markdown(f'<div class="{img_cls}-anchor"></div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown('<div class="compare-title">Original</div>', unsafe_allow_html=True)
-        if original_bytes:
-            st.image(original_bytes, use_container_width=not full_size)
-        st.markdown(
-            f'<div class="compare-label">{format_bytes(result.original_bytes)}</div>',
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown('<div class="compare-title">WebP output</div>', unsafe_allow_html=True)
-        if result.webp_data:
-            st.image(result.webp_data, use_container_width=not full_size)
-        st.markdown(
-            f'<div class="compare-label">{format_bytes(result.webp_bytes)}</div>',
-            unsafe_allow_html=True,
+    if original_bytes and result.webp_data:
+        render_sync_compare_view(
+            original_bytes,
+            result.webp_data,
+            orig_label=format_bytes(result.original_bytes),
+            webp_label=format_bytes(result.webp_bytes),
+            element_id=f"cmp-{result.file_id}",
         )
     st.markdown(
         f'<div class="compare-stats">'
