@@ -414,6 +414,82 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
 }}
 .estimate-copy strong {{ color: {GREEN}; }}
 
+/* Workflow stepper */
+.workflow-stepper {{
+    display: flex; align-items: center; justify-content: center; gap: 0;
+    background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 3px;
+    padding: 0.65rem 1rem; margin-bottom: 0.85rem;
+}}
+.workflow-step {{
+    display: flex; align-items: center; gap: 0.45rem;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: {TEXT_MUTED}; padding: 0.25rem 0.5rem; border-radius: 2px;
+    border: 1px solid transparent;
+}}
+.workflow-step .step-num {{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.15rem; height: 1.15rem; border-radius: 2px;
+    font-size: 0.58rem; font-weight: 700;
+    border: 1px solid {BORDER}; color: {TEXT_MUTED}; background: {BG_DEEP};
+}}
+.workflow-step.done {{ color: {GREEN}; }}
+.workflow-step.done .step-num {{
+    background: rgba(0, 200, 83, 0.12); border-color: {GREEN}; color: {GREEN};
+}}
+.workflow-step.done .step-num::after {{ content: "✓"; font-size: 0.62rem; }}
+.workflow-step.done .step-num {{ font-size: 0; }}
+.workflow-step.active {{ color: {CYAN}; border-color: rgba(0, 212, 255, 0.25); }}
+.workflow-step.active .step-num {{
+    border-color: {CYAN}; color: {CYAN}; background: rgba(0, 212, 255, 0.08);
+}}
+.workflow-step.active.converting {{
+    color: {GREEN}; border-color: rgba(0, 200, 83, 0.3);
+    animation: hmi-border-pulse 1.2s ease-in-out infinite;
+}}
+.workflow-step.active.converting .step-num {{
+    border-color: {GREEN}; color: {GREEN}; background: rgba(0, 200, 83, 0.1);
+}}
+.workflow-connector {{
+    flex: 0 0 2rem; height: 1px; background: {BORDER}; margin: 0 0.15rem;
+}}
+.workflow-connector.done {{ background: {GREEN}; }}
+
+/* Sidebar preset buttons */
+.preset-grid {{
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem;
+    margin-bottom: 0.75rem;
+}}
+.preset-label {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN};
+    margin: 0 0 0.35rem 0; grid-column: 1 / -1;
+}}
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(.preset-anchor) {{
+    gap: 0.35rem !important;
+}}
+[data-testid="stSidebar"] [data-testid="column"]:has(.preset-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.58rem !important; font-weight: 600 !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    background: {BG_DEEP} !important;
+    color: {TEXT_MUTED} !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 2px !important;
+    min-height: 1.65rem !important;
+    padding: 0.2rem 0.35rem !important;
+    width: 100% !important;
+}}
+[data-testid="stSidebar"] [data-testid="column"]:has(.preset-anchor) [data-testid="stButton"] button:hover {{
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="stSidebar"] [data-testid="column"]:has(.preset-anchor.preset-active) [data-testid="stButton"] button {{
+    border-color: {GREEN} !important; color: {GREEN} !important;
+    background: rgba(0, 200, 83, 0.08) !important;
+}}
+.preset-anchor {{ display: none; }}
+
 .empty-grid {{
     font-family: 'Inter', sans-serif; font-size: 0.82rem; color: {TEXT_MUTED};
     text-align: center; padding: 2rem 1rem;
@@ -497,6 +573,47 @@ def render_convert_blink_css(armed: bool) -> None:
 
 def render_airbus_css() -> None:
     st.markdown(f"<style>{AIRBUS_CSS}</style>", unsafe_allow_html=True)
+
+
+def render_workflow_stepper(
+    *,
+    has_files: bool,
+    has_results: bool,
+    can_download: bool,
+    converting: bool = False,
+) -> None:
+    """Main-area UPLOAD → CONVERT → DOWNLOAD procedure strip."""
+    upload_done = has_files
+    convert_done = has_results and not converting
+    upload_active = not has_files
+    convert_active = (has_files and not has_results) or converting
+    download_active = has_results and can_download and not converting
+
+    steps = [
+        ("Upload", upload_done, upload_active, False),
+        ("Convert", convert_done, convert_active, converting),
+        ("Download", False, download_active, False),
+    ]
+
+    parts: list[str] = []
+    for i, (label, done, active, pulse) in enumerate(steps):
+        if done:
+            cls = "workflow-step done"
+        elif active:
+            cls = "workflow-step active" + (" converting" if pulse else "")
+        else:
+            cls = "workflow-step"
+        parts.append(
+            f'<div class="{cls}"><span class="step-num">{i + 1}</span>{label}</div>'
+        )
+        if i < len(steps) - 1:
+            conn_done = steps[i][1]
+            parts.append(f'<div class="workflow-connector{" done" if conn_done else ""}"></div>')
+
+    st.markdown(
+        f'<div class="workflow-stepper">{"".join(parts)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_status_panel(

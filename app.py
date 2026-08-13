@@ -42,11 +42,19 @@ from theme.airbus import (
     render_estimate_panel,
     render_results_summary,
     render_status_panel,
+    render_workflow_stepper,
 )
 
 MAX_FILES = 100
 CARDS_PER_ROW = 4
 CARDS_PER_PAGE = 20
+
+COMPRESSION_PRESETS: dict[str, dict] = {
+    "Max quality": {"mode": "Fixed quality", "quality": 95, "resize": 100, "target_kb": 200},
+    "Web": {"mode": "Fixed quality", "quality": 80, "resize": 100, "target_kb": 200},
+    "Email": {"mode": "Target max file size", "quality": 85, "resize": 100, "target_kb": 150},
+    "Thumbnail": {"mode": "Fixed quality", "quality": 75, "resize": 50, "target_kb": 200},
+}
 
 
 @dataclass
@@ -70,10 +78,28 @@ def init_batch_state() -> None:
         "excluded_zip_ids": set(),
         "results_by_id": {},
         "grid_page": 0,
+        "sq_mode": "Fixed quality",
+        "sq_quality": DEFAULT_QUALITY,
+        "sq_resize": 100,
+        "sq_target_kb": 200,
+        "active_preset": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def clear_active_preset() -> None:
+    st.session_state.active_preset = None
+
+
+def apply_compression_preset(name: str) -> None:
+    preset = COMPRESSION_PRESETS[name]
+    st.session_state.sq_mode = preset["mode"]
+    st.session_state.sq_quality = preset["quality"]
+    st.session_state.sq_resize = preset["resize"]
+    st.session_state.sq_target_kb = preset["target_kb"]
+    st.session_state.active_preset = name
 
 
 def make_file_id(data: bytes) -> str:
@@ -429,19 +455,108 @@ def render_thumbnail_grid(
                     st.markdown("</div>", unsafe_allow_html=True)
 
 
+def render_grid_block(
+    preview_files: list[PreviewFile],
+    page: int,
+    *,
+    results_by_id: dict[str, ConversionResult],
+    live_status: dict[str, str] | None,
+    quality: int,
+    resize_pct: int,
+    target_kb: int | None,
+    has_results: bool,
+) -> None:
+    total_pages = max(1, math.ceil(len(preview_files) / CARDS_PER_PAGE))
+    st.session_state.grid_page = min(page, total_pages - 1)
+    page = st.session_state.grid_page
+
+    st.markdown('<div class="grid-panel">', unsafe_allow_html=True)
+    st.markdown(f'<div class="grid-panel-title">Images ({len(preview_files)})</div>', unsafe_allow_html=True)
+    render_thumbnail_grid(
+        preview_files,
+        page,
+        results_by_id=results_by_id,
+        live_status=live_status,
+        quality=quality,
+        resize_pct=resize_pct,
+        target_kb=target_kb,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if total_pages > 1:
+        p1, p2, p3 = st.columns([1, 2, 1])
+        with p1:
+            if st.button("← Prev", disabled=page <= 0, key="grid_prev"):
+                st.session_state.grid_page -= 1
+                st.rerun()
+        with p2:
+            st.caption(f"Page {page + 1} of {total_pages}")
+        with p3:
+            if st.button("Next →", disabled=page >= total_pages - 1, key="grid_next"):
+                st.session_state.grid_page += 1
+                st.rerun()
+
+    if has_results:
+        with st.expander("Detailed table"):
+            results = get_ordered_results()
+            st.dataframe(
+                [
+                    {
+                        "Status": "OK" if r.success else "Failed",
+                        "Path": r.relative_path,
+                        "Before": format_bytes(r.original_bytes),
+                        "After": format_bytes(r.webp_bytes) if r.success else "—",
+                        "Saved": f"{r.savings_pct:.1f}%" if r.savings_pct is not None else "—",
+                        "In ZIP": r.file_id not in st.session_state.excluded_zip_ids,
+                    }
+                    for r in results
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+
 def run_conversion(
     supported_previews: list[PreviewFile],
+    preview_files: list[PreviewFile],
     quality: int,
     resize_pct: int,
     target_kb: int | None,
     quality_mode: str,
+    *,
+    grid_placeholder,
+    stepper_placeholder,
+    can_download: bool,
 ) -> None:
     progress = st.progress(0, text="Converting…")
     items = [(p.file_id, p.relative_path, p.read_data()) for p in supported_previews]
     target_bytes = target_kb * 1024 if target_kb else None
     jobs = build_convert_jobs(items, quality=quality, resize_pct=resize_pct, target_bytes=target_bytes)
-    results_by_id: dict[str, ConversionResult] = {}
+    partial_results: dict[str, ConversionResult] = {}
+    live_status = {job.file_id: "converting" for job in jobs}
     completed = 0
+
+    def refresh_ui() -> None:
+        with stepper_placeholder.container():
+            render_workflow_stepper(
+                has_files=True,
+                has_results=False,
+                can_download=can_download,
+                converting=True,
+            )
+        with grid_placeholder.container():
+            render_grid_block(
+                preview_files,
+                st.session_state.grid_page,
+                results_by_id=partial_results,
+                live_status=live_status,
+                quality=quality,
+                resize_pct=resize_pct,
+                target_kb=target_kb,
+                has_results=False,
+            )
+
+    refresh_ui()
 
     workers = min(8, len(jobs)) if jobs else 1
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -465,11 +580,16 @@ def run_conversion(
                     quality_used=job.quality,
                     error=str(exc),
                 )
-            results_by_id[job.file_id] = result
+            partial_results[job.file_id] = result
+            live_status.pop(job.file_id, None)
+            for pending in jobs:
+                if pending.file_id not in partial_results:
+                    live_status[pending.file_id] = "converting"
             completed += 1
             progress.progress(completed / len(jobs), text=f"Converted {completed} of {len(jobs)}")
+            refresh_ui()
 
-    for result in results_by_id.values():
+    for result in partial_results.values():
         st.session_state.results_by_id[result.file_id] = result
 
     st.session_state["results"] = get_ordered_results()
@@ -503,21 +623,49 @@ render_airbus_css()
 with st.sidebar:
     st.markdown('<div class="ecam-cfg-anchor"></div>', unsafe_allow_html=True)
     st.markdown("### Settings")
+    st.markdown('<div class="preset-label">Presets</div>', unsafe_allow_html=True)
+    active_preset = st.session_state.active_preset
+    preset_names = list(COMPRESSION_PRESETS.keys())
+    pr1, pr2 = st.columns(2)
+    for col, name in zip((pr1, pr2), preset_names[:2]):
+        with col:
+            active_cls = " preset-active" if active_preset == name else ""
+            st.markdown(f'<div class="preset-anchor{active_cls}"></div>', unsafe_allow_html=True)
+            if st.button(name, key=f"preset_{name}", use_container_width=True):
+                apply_compression_preset(name)
+                st.rerun()
+    pr3, pr4 = st.columns(2)
+    for col, name in zip((pr3, pr4), preset_names[2:]):
+        with col:
+            active_cls = " preset-active" if active_preset == name else ""
+            st.markdown(f'<div class="preset-anchor{active_cls}"></div>', unsafe_allow_html=True)
+            if st.button(name, key=f"preset_{name}", use_container_width=True):
+                apply_compression_preset(name)
+                st.rerun()
+
     st.markdown('<div class="ecam-field-label">Mode</div>', unsafe_allow_html=True)
     quality_mode = st.radio(
         "Mode",
         ["Fixed quality", "Target max file size"],
         help="Fixed uses a quality slider. Target finds the best quality under a size cap.",
         label_visibility="collapsed",
+        key="sq_mode",
+        on_change=clear_active_preset,
     )
     quality = DEFAULT_QUALITY
     target_kb: int | None = None
     if quality_mode == "Fixed quality":
-        quality = st.slider("Quality", 1, 100, DEFAULT_QUALITY)
+        quality = st.slider(
+            "Quality", 1, 100, key="sq_quality", on_change=clear_active_preset
+        )
         st.markdown(f'<div class="quality-label">{quality_label(quality).upper()}</div>', unsafe_allow_html=True)
     else:
-        target_kb = st.number_input("Target KB", min_value=10, max_value=5000, value=200, step=10)
-    resize_pct = st.slider("Resize", 10, 100, 100, format="%d%%")
+        target_kb = st.number_input(
+            "Target KB", min_value=10, max_value=5000, step=10, key="sq_target_kb", on_change=clear_active_preset
+        )
+    resize_pct = st.slider(
+        "Resize", 10, 100, format="%d%%", key="sq_resize", on_change=clear_active_preset
+    )
 
 preview_files, estimate = (
     get_preview_files(quality, resize_pct, target_kb) if st.session_state.batch_files else ([], None)
@@ -564,7 +712,24 @@ with st.sidebar:
             total_files=estimate.total_files,
         )
 
-# --- Main: upload → convert → grid ---
+# --- Main: stepper → upload → convert → grid ---
+stepper_slot = st.empty()
+grid_slot = st.empty()
+
+can_download = False
+if has_results:
+    _results = get_ordered_results()
+    _successful = [r for r in _results if r.success]
+    _included = [r for r in _successful if r.file_id not in st.session_state.excluded_zip_ids]
+    can_download = bool(_included)
+
+with stepper_slot.container():
+    render_workflow_stepper(
+        has_files=bool(preview_files),
+        has_results=has_results,
+        can_download=can_download,
+    )
+
 new_uploads = st.file_uploader(
     "Upload images or ZIP",
     type=None,
@@ -630,62 +795,38 @@ if preview_files or has_results:
                 )
 
 if convert_clicked and can_convert:
-    run_conversion(supported_previews, quality, resize_pct, target_kb, quality_mode)
-
-if preview_files:
-    total_pages = max(1, math.ceil(len(preview_files) / CARDS_PER_PAGE))
-    st.session_state.grid_page = min(st.session_state.grid_page, total_pages - 1)
-
-    st.markdown('<div class="grid-panel">', unsafe_allow_html=True)
-    st.markdown(f'<div class="grid-panel-title">Images ({len(preview_files)})</div>', unsafe_allow_html=True)
-    render_thumbnail_grid(
+    run_conversion(
+        supported_previews,
         preview_files,
-        st.session_state.grid_page,
-        results_by_id=st.session_state.results_by_id,
-        quality=quality,
-        resize_pct=resize_pct,
-        target_kb=target_kb,
+        quality,
+        resize_pct,
+        target_kb,
+        quality_mode,
+        grid_placeholder=grid_slot,
+        stepper_placeholder=stepper_slot,
+        can_download=can_download,
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    if total_pages > 1:
-        p1, p2, p3 = st.columns([1, 2, 1])
-        with p1:
-            if st.button("← Prev", disabled=st.session_state.grid_page <= 0):
-                st.session_state.grid_page -= 1
-                st.rerun()
-        with p2:
-            st.caption(f"Page {st.session_state.grid_page + 1} of {total_pages}")
-        with p3:
-            if st.button("Next →", disabled=st.session_state.grid_page >= total_pages - 1):
-                st.session_state.grid_page += 1
-                st.rerun()
-
-    if has_results:
-        with st.expander("Detailed table"):
-            results = get_ordered_results()
-            st.dataframe(
-                [
-                    {
-                        "Status": "OK" if r.success else "Failed",
-                        "Path": r.relative_path,
-                        "Before": format_bytes(r.original_bytes),
-                        "After": format_bytes(r.webp_bytes) if r.success else "—",
-                        "Saved": f"{r.savings_pct:.1f}%" if r.savings_pct is not None else "—",
-                        "In ZIP": r.file_id not in st.session_state.excluded_zip_ids,
-                    }
-                    for r in results
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
+if preview_files and not (convert_clicked and can_convert):
+    with grid_slot.container():
+        render_grid_block(
+            preview_files,
+            st.session_state.grid_page,
+            results_by_id=st.session_state.results_by_id,
+            live_status=None,
+            quality=quality,
+            resize_pct=resize_pct,
+            target_kb=target_kb,
+            has_results=has_results,
+        )
 elif not new_uploads:
-    st.markdown(
-        '<div class="grid-panel"><div class="empty-grid">'
-        "Upload images above, then click <strong>Convert</strong>."
-        "</div></div>",
-        unsafe_allow_html=True,
-    )
+    with grid_slot.container():
+        st.markdown(
+            '<div class="grid-panel"><div class="empty-grid">'
+            "Upload images above, then click <strong>Convert</strong>."
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
 
 if st.session_state.get("convert_armed"):
     render_convert_blink_css(True)
