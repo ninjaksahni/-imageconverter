@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 import streamlit as st
 
 BG_DEEP = "#12151a"
@@ -490,6 +492,257 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
 }}
 .preset-anchor {{ display: none; }}
 
+/* Grid filter chips */
+.grid-toolbar {{
+    margin-bottom: 0.75rem;
+}}
+.grid-toolbar-label {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN};
+    margin: 0 0 0.4rem 0;
+}}
+.filter-anchor {{ display: none; }}
+[data-testid="stHorizontalBlock"]:has(.filter-anchor) {{
+    gap: 0.3rem !important; flex-wrap: wrap !important;
+}}
+[data-testid="column"]:has(.filter-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.56rem !important; font-weight: 600 !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    background: {BG_DEEP} !important;
+    color: {TEXT_MUTED} !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 2px !important;
+    min-height: 1.55rem !important;
+    padding: 0.18rem 0.4rem !important;
+    width: 100% !important;
+    white-space: nowrap !important;
+}}
+[data-testid="column"]:has(.filter-anchor) [data-testid="stButton"] button:hover {{
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="column"]:has(.filter-anchor.filter-active) [data-testid="stButton"] button {{
+    border-color: {GREEN} !important; color: {GREEN} !important;
+    background: rgba(0, 200, 83, 0.1) !important;
+    box-shadow: 0 0 8px rgba(0, 200, 83, 0.15) !important;
+}}
+.filter-summary {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};
+    margin: 0.35rem 0 0.55rem 0;
+}}
+.filter-summary strong {{ color: {TEXT_PRIMARY}; }}
+
+/* Bulk action bar */
+.bulk-anchor {{ display: none; }}
+.bulk-bar-label {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN};
+    margin: 0 0 0.35rem 0;
+}}
+[data-testid="stHorizontalBlock"]:has(.bulk-anchor) {{
+    gap: 0.3rem !important;
+    background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 2px;
+    padding: 0.45rem 0.5rem; margin-bottom: 0.65rem;
+}}
+[data-testid="column"]:has(.bulk-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.56rem !important; font-weight: 600 !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    background: transparent !important;
+    color: {TEXT_MUTED} !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 2px !important;
+    min-height: 1.5rem !important;
+    padding: 0.15rem 0.35rem !important;
+    width: 100% !important;
+}}
+[data-testid="column"]:has(.bulk-anchor) [data-testid="stButton"] button:hover {{
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="column"]:has(.bulk-anchor.bulk-danger) [data-testid="stButton"] button:hover {{
+    border-color: {RED} !important; color: {RED} !important;
+}}
+
+/* Download options + ready state */
+.download-opts-anchor {{ display: none; }}
+[data-testid="column"]:has(.download-opts-anchor) {{
+    display: flex !important; flex-direction: column !important;
+    align-items: center !important; justify-content: center !important;
+    padding-top: 0.15rem !important;
+}}
+[data-testid="column"]:has(.download-opts-anchor) label[data-baseweb="checkbox"] {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.58rem !important; text-transform: uppercase !important;
+    letter-spacing: 0.06em !important; color: {TEXT_MUTED} !important;
+}}
+[data-testid="column"]:has(.download-opts-anchor) label[data-baseweb="checkbox"] span {{
+    font-size: 0.58rem !important; color: {TEXT_MUTED} !important;
+}}
+.download-ready-msg {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    color: {GREEN}; text-transform: uppercase; letter-spacing: 0.08em;
+    margin: 0.25rem 0 0 0; text-align: center;
+    animation: hmi-border-pulse 1.2s ease-in-out infinite;
+}}
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] > button,
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) button[data-testid="stBaseButton-primary"] {{
+    animation: hmi-convert-blink 0.85s step-end infinite !important;
+}}
+
+/* Unified control bar */
+.hmi-control-bar-anchor {{ display: none; }}
+.hmi-control-bar-anchor + [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"]:first-of-type,
+div[data-testid="stVerticalBlock"]:has(> .stElementContainer .hmi-control-bar-anchor) > [data-testid="stHorizontalBlock"]:first-of-type {{
+    background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 3px;
+    padding: 0.55rem 0.65rem 0.45rem; margin: 0.65rem 0 0.35rem;
+    align-items: center !important;
+}}
+.hmi-control-bar-footer {{
+    margin: 0.15rem 0 0.75rem 0; padding: 0 0.15rem;
+}}
+.hmi-control-bar-footer label[data-baseweb="checkbox"] {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.58rem !important; text-transform: uppercase !important;
+    letter-spacing: 0.06em !important; color: {TEXT_MUTED} !important;
+}}
+.hmi-control-bar-footer .ready {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    color: {GREEN}; text-transform: uppercase; letter-spacing: 0.08em;
+    display: block; text-align: right; margin-top: 0.35rem;
+    animation: hmi-border-pulse 1.2s ease-in-out infinite;
+}}
+[data-testid="column"]:has(.hmi-bar-clear-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important; font-weight: 600 !important;
+    font-size: 0.68rem !important; letter-spacing: 0.08em !important;
+    text-transform: uppercase !important; background: {BG_DEEP} !important;
+    color: {TEXT_PRIMARY} !important; border: 1px solid {BORDER} !important;
+    border-radius: 2px !important; min-height: 2.45rem !important;
+}}
+[data-testid="column"]:has(.hmi-bar-clear-anchor) [data-testid="stButton"] button:hover {{
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="column"]:has(.hmi-bar-cancel-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important; font-weight: 600 !important;
+    font-size: 0.68rem !important; letter-spacing: 0.08em !important;
+    text-transform: uppercase !important; background: rgba(255, 61, 61, 0.08) !important;
+    color: {RED} !important; border: 1px solid {RED} !important;
+    border-radius: 2px !important; min-height: 2.45rem !important;
+}}
+
+/* View mode toggle */
+.view-mode-anchor {{ display: none; }}
+.grid-header-row {{
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 0.55rem; gap: 0.5rem;
+}}
+[data-testid="column"]:has(.view-mode-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important; font-size: 0.56rem !important;
+    font-weight: 600 !important; letter-spacing: 0.06em !important;
+    text-transform: uppercase !important; background: {BG_DEEP} !important;
+    color: {TEXT_MUTED} !important; border: 1px solid {BORDER} !important;
+    border-radius: 2px !important; min-height: 1.55rem !important; padding: 0.15rem 0.5rem !important;
+}}
+[data-testid="column"]:has(.view-mode-anchor.view-active) [data-testid="stButton"] button {{
+    border-color: {GREEN} !important; color: {GREEN} !important;
+    background: rgba(0, 200, 83, 0.1) !important;
+}}
+
+/* List view rows */
+.list-row {{
+    display: grid; grid-template-columns: 52px 1fr auto auto;
+    gap: 0.55rem; align-items: center;
+    background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 2px;
+    padding: 0.45rem 0.55rem; margin-bottom: 0.35rem;
+}}
+.list-row.failed {{ border-color: {RED}; }}
+.list-row.unsupported {{ border-color: {AMBER}; }}
+.list-row.excluded {{ opacity: 0.55; }}
+.list-thumb {{
+    width: 48px; height: 48px; border-radius: 2px; overflow: hidden;
+    border: 1px solid {BORDER}; background: #0a0c0f;
+    display: flex; align-items: center; justify-content: center;
+}}
+.list-thumb img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
+.list-name {{
+    font-family: 'Inter', sans-serif; font-size: 0.72rem; font-weight: 600;
+    color: {TEXT_PRIMARY}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}}
+.list-meta {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};
+    white-space: nowrap;
+}}
+.list-actions {{ display: flex; gap: 0.2rem; flex-wrap: wrap; justify-content: flex-end; }}
+
+/* Compare dialog content */
+.compare-panel {{
+    background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 3px; padding: 0.65rem;
+}}
+.compare-title {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN}; margin-bottom: 0.45rem;
+}}
+.compare-frame {{
+    border: 1px solid {BORDER}; border-radius: 2px; background: #0a0c0f;
+    padding: 0.35rem; text-align: center; min-height: 120px;
+}}
+.compare-frame img {{ max-width: 100%; max-height: 220px; object-fit: contain; }}
+.compare-label {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};
+    margin-top: 0.35rem; text-transform: uppercase; letter-spacing: 0.08em;
+}}
+.compare-stats {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; color: {TEXT_MUTED};
+    margin-top: 0.65rem; padding: 0.45rem 0.55rem;
+    border-left: 2px solid {GREEN}; background: rgba(0, 200, 83, 0.06);
+}}
+.compare-stats strong {{ color: {GREEN}; }}
+
+/* Empty + converting states */
+.empty-state {{
+    text-align: center; padding: 2rem 1.25rem 1.75rem;
+}}
+.empty-state-icon {{
+    font-size: 1.75rem; margin-bottom: 0.65rem; opacity: 0.45;
+}}
+.empty-state-title {{
+    font-family: 'Inter', sans-serif; font-size: 0.92rem; font-weight: 600;
+    color: {TEXT_PRIMARY}; margin-bottom: 0.35rem;
+}}
+.empty-state-copy {{
+    font-family: 'Inter', sans-serif; font-size: 0.76rem; color: {TEXT_MUTED};
+    line-height: 1.5; max-width: 28rem; margin: 0 auto 1rem;
+}}
+.empty-steps {{
+    display: flex; justify-content: center; gap: 0.75rem; flex-wrap: wrap;
+    margin-top: 0.75rem;
+}}
+.empty-step {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em; color: {TEXT_MUTED};
+    border: 1px solid {BORDER}; border-radius: 2px; padding: 0.35rem 0.55rem;
+    background: {BG_DEEP};
+}}
+.empty-formats {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.56rem; color: {CYAN};
+    margin-top: 0.85rem; letter-spacing: 0.06em;
+}}
+.converting-strip {{
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 0.5rem; background: rgba(0, 212, 255, 0.06); border: 1px solid rgba(0, 212, 255, 0.25);
+    border-radius: 2px; padding: 0.45rem 0.65rem; margin-bottom: 0.65rem;
+    animation: hmi-border-pulse 1.4s ease-in-out infinite;
+}}
+.converting-strip-text {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    color: {CYAN}; text-transform: uppercase; letter-spacing: 0.08em;
+}}
+.converting-strip-eta {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};
+}}
+.grid-panel.converting-dim {{ opacity: 0.92; }}
+
 .empty-grid {{
     font-family: 'Inter', sans-serif; font-size: 0.82rem; color: {TEXT_MUTED};
     text-align: center; padding: 2rem 1rem;
@@ -568,6 +821,72 @@ def render_convert_blink_css(armed: bool) -> None:
         </script>
         """,
         height=0,
+    )
+
+
+def render_download_ready_css() -> None:
+    """Scroll to and pulse the ZIP download button after conversion."""
+    import streamlit.components.v1 as components
+
+    components.html(
+        """
+        <script>
+        (function () {
+            const doc = window.parent.document;
+
+            function applyReady() {
+                const col = doc.querySelector('[data-testid="column"]:has(.hmi-btn-dl-anchor)');
+                const anchor = col && col.querySelector('.hmi-btn-dl-anchor');
+                if (anchor) anchor.classList.add('hmi-dl-ready');
+                const btn = col && col.querySelector('button[data-testid="stBaseButton-primary"]');
+                if (btn) {
+                    btn.classList.add('hmi-convert-blink-active');
+                    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            applyReady();
+            setTimeout(applyReady, 100);
+            setTimeout(applyReady, 400);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def render_empty_state() -> None:
+    st.markdown(
+        f"""
+        <div class="empty-state">
+            <div class="empty-state-icon">⬆</div>
+            <div class="empty-state-title">Drop images to begin</div>
+            <div class="empty-state-copy">
+                Upload individual images or a ZIP archive. Folder paths are preserved in the output ZIP.
+            </div>
+            <div class="empty-steps">
+                <span class="empty-step">1 · Upload</span>
+                <span class="empty-step">2 · Convert</span>
+                <span class="empty-step">3 · Download</span>
+            </div>
+            <div class="empty-formats">
+                JPEG · PNG · GIF · WebP · HEIC · TIFF · BMP · ICO
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_converting_strip(*, completed: int, total: int, eta_text: str) -> None:
+    st.markdown(
+        f"""
+        <div class="converting-strip">
+            <span class="converting-strip-text">Converting {completed} / {total}</span>
+            <span class="converting-strip-eta">{html.escape(eta_text)}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 

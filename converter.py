@@ -47,12 +47,19 @@ class ConversionResult:
 
 
 @dataclass
+class EncodeOptions:
+    lossless: bool = False
+    strip_metadata: bool = False
+
+
+@dataclass
 class ConvertJob:
     file_id: str
     relative_path: str
     data: bytes
     webp_name: str
     quality: int
+    encode_options: EncodeOptions | None = None
 
 
 def make_thumbnail(source: bytes | Image.Image, size: tuple[int, int] = THUMBNAIL_SIZE) -> bytes | None:
@@ -129,16 +136,33 @@ def _prepare_image(image: Image.Image) -> Image.Image:
     return image
 
 
-def _encode_webp(image: Image.Image, quality: int, *, fast: bool = False) -> bytes:
+def _strip_metadata(image: Image.Image) -> Image.Image:
+    cleaned = image.copy()
+    cleaned.info = {}
+    return cleaned
+
+
+def _encode_webp(
+    image: Image.Image,
+    quality: int,
+    *,
+    fast: bool = False,
+    encode_options: EncodeOptions | None = None,
+) -> bytes:
+    opts = encode_options or EncodeOptions()
+    prepared = _strip_metadata(image) if opts.strip_metadata else image
     buffer = io.BytesIO()
+    lossless = opts.lossless
     save_kwargs: dict = {
         "format": "WEBP",
-        "quality": quality,
         "method": 0 if fast else 6,
     }
-    if image.mode == "RGBA":
-        save_kwargs["lossless"] = quality >= 100
-    image.save(buffer, **save_kwargs)
+    if lossless:
+        save_kwargs["lossless"] = True
+        save_kwargs["quality"] = 100
+    else:
+        save_kwargs["quality"] = quality
+    prepared.save(buffer, **save_kwargs)
     return buffer.getvalue()
 
 
@@ -148,6 +172,7 @@ def _webp_size_from_bytes(
     quality: int = DEFAULT_QUALITY,
     resize_pct: int = 100,
     fast: bool = False,
+    encode_options: EncodeOptions | None = None,
 ) -> int:
     with Image.open(io.BytesIO(file_bytes)) as image:
         image.load()
@@ -159,7 +184,7 @@ def _webp_size_from_bytes(
                 max(1, int(prepared.height * scale)),
             )
             prepared = prepared.resize(new_size, Image.Resampling.LANCZOS)
-        return len(_encode_webp(prepared, quality, fast=fast))
+        return len(_encode_webp(prepared, quality, fast=fast, encode_options=encode_options))
 
 
 def find_quality_for_target_size(
@@ -243,10 +268,14 @@ def _estimate_one(
     quality: int,
     resize_pct: int,
     target_bytes: int | None = None,
+    encode_options: EncodeOptions | None = None,
 ) -> FileEstimate:
     original_bytes = len(data)
     effective_quality = quality
-    if target_bytes:
+    opts = encode_options or EncodeOptions()
+    if opts.lossless:
+        effective_quality = 100
+    elif target_bytes:
         effective_quality = find_quality_for_target_size(data, target_bytes, resize_pct=resize_pct)
     try:
         webp_bytes = _webp_size_from_bytes(
@@ -254,6 +283,7 @@ def _estimate_one(
             quality=effective_quality,
             resize_pct=resize_pct,
             fast=True,
+            encode_options=opts,
         )
     except Exception:
         webp_bytes = original_bytes
@@ -266,6 +296,7 @@ def estimate_batch(
     quality: int = DEFAULT_QUALITY,
     resize_pct: int = 100,
     target_bytes: int | None = None,
+    encode_options: EncodeOptions | None = None,
 ) -> BatchEstimate | None:
     if not files:
         return None
@@ -273,7 +304,16 @@ def estimate_batch(
     if len(files) == 1:
         name, data = files[0]
         return BatchEstimate(
-            files=[_estimate_one(name, data, quality=quality, resize_pct=resize_pct, target_bytes=target_bytes)]
+            files=[
+                _estimate_one(
+                    name,
+                    data,
+                    quality=quality,
+                    resize_pct=resize_pct,
+                    target_bytes=target_bytes,
+                    encode_options=encode_options,
+                )
+            ]
         )
 
     workers = min(MAX_CONVERT_WORKERS, len(files))
@@ -286,6 +326,7 @@ def estimate_batch(
                     quality=quality,
                     resize_pct=resize_pct,
                     target_bytes=target_bytes,
+                    encode_options=encode_options,
                 ),
                 files,
             )
@@ -303,6 +344,7 @@ def convert_image(
     resize_pct: int = 100,
     used_names: set[str] | None = None,
     webp_name: str | None = None,
+    encode_options: EncodeOptions | None = None,
 ) -> ConversionResult:
     used = used_names if used_names is not None else set()
     rel = relative_path or filename
@@ -311,6 +353,8 @@ def convert_image(
     output_name = webp_name or webp_name_for_relative(rel, used)
     original_bytes = len(file_bytes)
     original_preview = make_thumbnail(file_bytes)
+    opts = encode_options or EncodeOptions()
+    effective_quality = 100 if opts.lossless else quality
 
     try:
         with Image.open(io.BytesIO(file_bytes)) as image:
@@ -325,7 +369,7 @@ def convert_image(
                 )
                 prepared = prepared.resize(new_size, Image.Resampling.LANCZOS)
 
-            webp_data = _encode_webp(prepared, quality)
+            webp_data = _encode_webp(prepared, effective_quality, encode_options=opts)
             webp_preview = make_thumbnail(prepared)
 
         return ConversionResult(
@@ -339,7 +383,7 @@ def convert_image(
             original_preview=original_preview,
             webp_preview=webp_preview,
             success=True,
-            quality_used=quality,
+            quality_used=effective_quality if not opts.lossless else 100,
         )
     except Exception as exc:
         return ConversionResult(
@@ -367,6 +411,7 @@ def _run_convert_job(job: ConvertJob, resize_pct: int) -> ConversionResult:
         quality=job.quality,
         resize_pct=resize_pct,
         webp_name=job.webp_name,
+        encode_options=job.encode_options,
     )
 
 
@@ -376,13 +421,17 @@ def build_convert_jobs(
     quality: int,
     resize_pct: int,
     target_bytes: int | None = None,
+    encode_options: EncodeOptions | None = None,
 ) -> list[ConvertJob]:
     used_names: set[str] = set()
     jobs: list[ConvertJob] = []
     for file_id, relative_path, data in items:
         rel = relative_path.replace("\\", "/")
+        opts = encode_options or EncodeOptions()
         effective_quality = quality
-        if target_bytes:
+        if opts.lossless:
+            effective_quality = 100
+        elif target_bytes:
             effective_quality = find_quality_for_target_size(data, target_bytes, resize_pct=resize_pct)
         jobs.append(
             ConvertJob(
@@ -391,6 +440,7 @@ def build_convert_jobs(
                 data=data,
                 webp_name=webp_name_for_relative(rel, used_names),
                 quality=effective_quality,
+                encode_options=opts,
             )
         )
     return jobs
