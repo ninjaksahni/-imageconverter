@@ -134,6 +134,7 @@ def init_batch_state() -> None:
         "mp4_result_warnings": [],
         "mp4_dialog_open": False,
         "mp4_uploader_key": 0,
+        "mp4_show_compare": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -149,6 +150,7 @@ def clear_mp4_state() -> None:
     st.session_state.mp4_last_upload_id = None
     st.session_state.mp4_compress_elapsed = None
     st.session_state.mp4_result_warnings = []
+    st.session_state.mp4_show_compare = False
 
 
 def clear_active_preset() -> None:
@@ -780,6 +782,7 @@ def render_mp4_sync_compare_view(
     orig_label: str,
     compressed_label: str,
     element_id: str,
+    height: int = 480,
 ) -> None:
     orig_uri = _video_data_uri(original_path)
     comp_uri = _video_data_uri(compressed_path)
@@ -854,8 +857,61 @@ def render_mp4_sync_compare_view(
         }})();
         </script>
         """,
-        height=480,
+        height=height,
     )
+
+
+def render_mp4_inline_compare() -> None:
+    """Side-by-side compare panel rendered inside the compress dialog."""
+    output_path = st.session_state.get("mp4_output_path")
+    input_path = st.session_state.get("mp4_input_path")
+    if not output_path or not input_path:
+        st.markdown(
+            '<div class="mp4-compare-placeholder">Compare appears here after compression.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    original = Path(input_path)
+    compressed = Path(output_path)
+    if not original.exists() or not compressed.exists():
+        st.markdown(
+            '<div class="mp4-compare-placeholder">Video files unavailable.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    if not st.session_state.get("mp4_show_compare"):
+        st.markdown(
+            '<div class="mp4-compare-placeholder">Click <strong>Show compare</strong> to preview original vs compressed.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    original_bytes = original.stat().st_size
+    output_bytes = compressed.stat().st_size
+    total_bytes = original_bytes + output_bytes
+    element_id = re.sub(r"[^a-zA-Z0-9_-]", "", f"mp4cmp-{st.session_state.mp4_last_upload_id or 'vid'}")
+
+    if total_bytes <= MP4_COMPARE_MAX_BYTES:
+        render_mp4_sync_compare_view(
+            original,
+            compressed,
+            orig_label=format_bytes(original_bytes),
+            compressed_label=format_bytes(output_bytes),
+            element_id=element_id,
+            height=340,
+        )
+    else:
+        st.markdown(
+            '<p class="upload-hint">Large files — unsynced preview.</p>',
+            unsafe_allow_html=True,
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('<div class="compare-title">Original</div>', unsafe_allow_html=True)
+            st.video(original.read_bytes())
+        with col2:
+            st.markdown('<div class="compare-title">Compressed</div>', unsafe_allow_html=True)
+            st.video(compressed.read_bytes())
 
 
 def _mp4_max_height_label(max_height: int | None) -> str:
@@ -927,6 +983,7 @@ def show_mp4_compress_dialog() -> None:
             st.session_state.mp4_last_upload_id = upload_id
             st.session_state.mp4_compress_elapsed = None
             st.session_state.mp4_result_warnings = []
+            st.session_state.mp4_show_compare = False
 
     probe = _load_mp4_probe()
     if probe is None:
@@ -941,62 +998,80 @@ def show_mp4_compress_dialog() -> None:
         audio_bitrate=format_bitrate(probe.audio_bitrate) if probe.has_audio else "No audio",
     )
 
-    preset_names = list(QUALITY_PRESETS.keys())
-    preset = st.radio(
-        "Quality preset",
-        preset_names,
-        index=preset_names.index("Balanced"),
-        key="mp4_quality_preset",
-    )
-    st.markdown(
-        f'<div class="mp4-preset-hint">{html.escape(str(QUALITY_PRESETS[preset]["description"]))}</div>',
-        unsafe_allow_html=True,
-    )
+    output_path = st.session_state.get("mp4_output_path")
+    has_output = bool(output_path and Path(output_path).exists())
 
-    res_options = ["Original", "1080p maximum", "720p maximum"]
-    max_res_label = st.radio(
-        "Maximum resolution",
-        res_options,
-        horizontal=True,
-        key="mp4_max_resolution",
-        help="Never upscales — only reduces resolution when the source is larger.",
-    )
-    max_height_map = {
-        "Original": None,
-        "1080p maximum": 1080,
-        "720p maximum": 720,
-    }
-    max_height = max_height_map[max_res_label]
-
-    remove_audio = True
-    if probe.has_audio:
-        remove_audio = st.checkbox(
-            "Remove audio",
-            value=True,
-            key="mp4_remove_audio",
-            help="Product videos often do not need audio. Uncheck to keep AAC at 96 kbps.",
+    settings_col, compare_col = st.columns([1, 1.15], gap="medium")
+    with settings_col:
+        preset_names = list(QUALITY_PRESETS.keys())
+        preset = st.radio(
+            "Quality preset",
+            preset_names,
+            index=preset_names.index("Balanced"),
+            key="mp4_quality_preset",
         )
-
-    options = options_from_preset(
-        preset,
-        probe,
-        max_height=max_height,
-        remove_audio=remove_audio,
-    )
-    warnings = validate_options(probe, options)
-
-    if options.auto_selected:
-        cap_label = _mp4_max_height_label(options.max_height)
-        audio_label = "removed" if options.remove_audio else "AAC 96k"
         st.markdown(
-            f'<div class="mp4-auto-summary">Auto selected: CRF <strong>{options.crf}</strong> · '
-            f"Max res <strong>{html.escape(cap_label)}</strong> · "
-            f"Audio <strong>{html.escape(audio_label)}</strong></div>",
+            f'<div class="mp4-preset-hint">{html.escape(str(QUALITY_PRESETS[preset]["description"]))}</div>',
             unsafe_allow_html=True,
         )
 
-    for warning in warnings:
-        st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
+        res_options = ["Original", "1080p maximum", "720p maximum"]
+        max_res_label = st.radio(
+            "Maximum resolution",
+            res_options,
+            horizontal=True,
+            key="mp4_max_resolution",
+            help="Never upscales — only reduces resolution when the source is larger.",
+        )
+        max_height_map = {
+            "Original": None,
+            "1080p maximum": 1080,
+            "720p maximum": 720,
+        }
+        max_height = max_height_map[max_res_label]
+
+        remove_audio = True
+        if probe.has_audio:
+            remove_audio = st.checkbox(
+                "Remove audio",
+                value=True,
+                key="mp4_remove_audio",
+                help="Product videos often do not need audio. Uncheck to keep AAC at 96 kbps.",
+            )
+
+        options = options_from_preset(
+            preset,
+            probe,
+            max_height=max_height,
+            remove_audio=remove_audio,
+        )
+        warnings = validate_options(probe, options)
+
+        if options.auto_selected:
+            cap_label = _mp4_max_height_label(options.max_height)
+            audio_label = "removed" if options.remove_audio else "AAC 96k"
+            st.markdown(
+                f'<div class="mp4-auto-summary">Auto selected: CRF <strong>{options.crf}</strong> · '
+                f"Max res <strong>{html.escape(cap_label)}</strong> · "
+                f"Audio <strong>{html.escape(audio_label)}</strong></div>",
+                unsafe_allow_html=True,
+            )
+
+        for warning in warnings:
+            st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
+
+    with compare_col:
+        st.markdown('<div class="mp4-compare-heading">Compare</div>', unsafe_allow_html=True)
+        if has_output:
+            compare_label = "Hide" if st.session_state.get("mp4_show_compare") else "Show compare"
+            if st.button(
+                compare_label,
+                key="mp4_compare_toggle",
+                help="Toggle side-by-side preview",
+                use_container_width=True,
+            ):
+                st.session_state.mp4_show_compare = not st.session_state.get("mp4_show_compare", False)
+        render_mp4_inline_compare()
 
     close_col, reset_col, compress_col = st.columns(3)
     with close_col:
@@ -1039,9 +1114,13 @@ def show_mp4_compress_dialog() -> None:
             st.session_state.mp4_output_path = result.output_path
             st.session_state.mp4_compress_elapsed = result.elapsed_s
             st.session_state.mp4_result_warnings = result.warnings
+            st.session_state.mp4_show_compare = True
+            st.session_state.mp4_dialog_open = True
+            st.rerun()
 
     output_path = st.session_state.get("mp4_output_path")
-    if output_path and Path(output_path).exists():
+    has_output = bool(output_path and Path(output_path).exists())
+    if has_output:
         for warning in st.session_state.get("mp4_result_warnings") or []:
             st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
 
@@ -1063,86 +1142,15 @@ def show_mp4_compress_dialog() -> None:
         )
 
         download_name = f"{Path(st.session_state.mp4_upload_name or 'video.mp4').stem}_compressed.mp4"
-        compare_col, download_col = st.columns(2)
-        with compare_col:
-            if st.button(
-                "👁",
-                key="mp4_compare",
-                help="Compare before / after",
-                use_container_width=True,
-            ):
-                show_mp4_compare_dialog()
-        with download_col:
-            st.download_button(
-                "↓",
-                data=Path(output_path).read_bytes(),
-                file_name=download_name,
-                mime="video/mp4",
-                key="mp4_download",
-                help="Download compressed MP4",
-                use_container_width=True,
-            )
-
-
-@st.dialog("Compare MP4 — Before / After", width="large")
-def show_mp4_compare_dialog() -> None:
-    input_path = st.session_state.get("mp4_input_path")
-    output_path = st.session_state.get("mp4_output_path")
-    if not input_path or not output_path:
-        st.warning("No compressed video available to compare.")
-        return
-    original = Path(input_path)
-    compressed = Path(output_path)
-    if not original.exists() or not compressed.exists():
-        st.warning("Video files are missing.")
-        return
-
-    probe = probe_video(original)
-    output_probe = probe_video(compressed)
-    original_bytes = original.stat().st_size
-    output_bytes = compressed.stat().st_size
-    savings = (1 - output_bytes / original_bytes) * 100 if original_bytes > 0 else 0.0
-    safe_name = html.escape(st.session_state.get("mp4_upload_name") or original.name)
-
-    total_bytes = original_bytes + output_bytes
-    if total_bytes <= MP4_COMPARE_MAX_BYTES:
-        render_mp4_sync_compare_view(
-            original,
-            compressed,
-            orig_label=format_bytes(original_bytes),
-            compressed_label=format_bytes(output_bytes),
-            element_id=f"mp4cmp-{st.session_state.mp4_last_upload_id or 'vid'}",
+        st.download_button(
+            "↓ DOWNLOAD MP4",
+            data=Path(output_path).read_bytes(),
+            file_name=download_name,
+            mime="video/mp4",
+            key="mp4_download",
+            help="Download compressed MP4",
+            use_container_width=True,
         )
-    else:
-        st.markdown(
-            '<p class="upload-hint">Files are large — players are not synced in this mode.</p>',
-            unsafe_allow_html=True,
-        )
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown('<div class="compare-title">Original</div>', unsafe_allow_html=True)
-            st.video(original.read_bytes())
-            st.markdown(
-                f'<div class="compare-label">{format_bytes(original_bytes)}</div>',
-                unsafe_allow_html=True,
-            )
-        with col2:
-            st.markdown('<div class="compare-title">Compressed</div>', unsafe_allow_html=True)
-            st.video(compressed.read_bytes())
-            st.markdown(
-                f'<div class="compare-label">{format_bytes(output_bytes)}</div>',
-                unsafe_allow_html=True,
-            )
-
-    st.markdown(
-        f'<div class="compare-stats">'
-        f"<strong>{safe_name}</strong><br>"
-        f"{format_bytes(original_bytes)} → <strong>{format_bytes(output_bytes)}</strong>"
-        f" · Saved <strong>{savings:.1f}%</strong>"
-        f" · {html.escape(probe.display_resolution)} → {html.escape(output_probe.display_resolution)}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
 
 
 @st.dialog("Compare — Before / After", width="large")

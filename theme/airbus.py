@@ -951,6 +951,16 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     line-height: 1.65;
 }}
 .mp4-results-row strong {{ color: {GREEN}; }}
+.mp4-compare-heading {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN}; margin-bottom: 0.45rem;
+}}
+.mp4-compare-placeholder {{
+    font-family: 'Inter', sans-serif; font-size: 0.72rem; color: {TEXT_MUTED};
+    background: {BG_DEEP}; border: 1px dashed {BORDER}; border-radius: 2px;
+    padding: 2.5rem 0.75rem; text-align: center; line-height: 1.5; min-height: 200px;
+    display: flex; align-items: center; justify-content: center;
+}}
 [data-testid="stSidebar"] .mp4-sidebar-btn-anchor + .stButton > button {{
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 0.72rem !important; font-weight: 600 !important;
