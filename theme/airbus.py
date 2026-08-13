@@ -1305,28 +1305,6 @@ def render_video_probe_panel(
     )
 
 
-def render_video_estimate_panel(
-    *,
-    original: str,
-    estimated: str,
-    savings_pct: str,
-    output_resolution: str,
-) -> None:
-    st.markdown(
-        f"""
-        <div class="estimate-panel">
-            <div class="title">Size estimate</div>
-            <div class="estimate-copy">
-                {html.escape(original)} → ~<strong>{html.escape(estimated)}</strong><br>
-                Est. savings <strong>{html.escape(savings_pct)}</strong>
-                · Output <strong>{html.escape(output_resolution)}</strong>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def render_video_results_panel(
     *,
     original_size: str,

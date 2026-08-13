@@ -49,7 +49,6 @@ from theme.airbus import (
     render_estimate_panel,
     render_results_summary,
     render_status_panel,
-    render_video_estimate_panel,
     render_video_probe_panel,
     render_video_results_panel,
     render_workflow_stepper,
@@ -61,7 +60,6 @@ from video_compressor import (
     cleanup_video_temp_dir,
     compress_video,
     create_video_temp_dir,
-    estimate_compress_size,
     format_bitrate,
     format_duration,
     options_from_preset,
@@ -71,6 +69,7 @@ from video_compressor import (
 )
 
 MAX_FILES = 100
+MP4_COMPARE_MAX_BYTES = 80 * 1024 * 1024
 CARDS_PER_ROW = 4
 CARDS_PER_PAGE = 20
 LIST_ROWS_PER_PAGE = 25
@@ -769,6 +768,96 @@ def render_sync_compare_view(
     )
 
 
+def _video_data_uri(path: Path) -> str:
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:video/mp4;base64,{encoded}"
+
+
+def render_mp4_sync_compare_view(
+    original_path: Path,
+    compressed_path: Path,
+    *,
+    orig_label: str,
+    compressed_label: str,
+    element_id: str,
+) -> None:
+    orig_uri = _video_data_uri(original_path)
+    comp_uri = _video_data_uri(compressed_path)
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", element_id)
+    components.html(
+        f"""
+        <style>
+        .compare-sync-root {{
+            font-family: 'IBM Plex Mono', monospace; color: #8b939e;
+        }}
+        .compare-sync-hint {{
+            font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #8b939e; margin-bottom: 0.45rem;
+        }}
+        .compare-sync-panels {{
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;
+        }}
+        .compare-panel-title {{
+            font-size: 0.62rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.1em; color: #00d4ff; margin-bottom: 0.35rem;
+        }}
+        .compare-sync-video {{
+            display: block; width: 100%; max-height: 45vh;
+            background: #0a0c0f; border: 1px solid #3d4450; border-radius: 2px;
+        }}
+        .compare-panel-label {{
+            font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #8b939e; margin-top: 0.35rem;
+        }}
+        </style>
+        <div class="compare-sync-root" id="root-{safe_id}">
+            <div class="compare-sync-hint">Playback is synced between both panels</div>
+            <div class="compare-sync-panels">
+                <div class="compare-panel">
+                    <div class="compare-panel-title">Original</div>
+                    <video class="compare-sync-video" id="orig-{safe_id}" controls playsinline
+                        src="{orig_uri}"></video>
+                    <div class="compare-panel-label">{html.escape(orig_label)}</div>
+                </div>
+                <div class="compare-panel">
+                    <div class="compare-panel-title">Compressed</div>
+                    <video class="compare-sync-video" id="comp-{safe_id}" controls playsinline
+                        src="{comp_uri}"></video>
+                    <div class="compare-panel-label">{html.escape(compressed_label)}</div>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function () {{
+            const a = document.getElementById("orig-{safe_id}");
+            const b = document.getElementById("comp-{safe_id}");
+            if (!a || !b) return;
+            let syncing = false;
+            function syncTime(source, target) {{
+                if (syncing) return;
+                if (Math.abs(target.currentTime - source.currentTime) > 0.12) {{
+                    syncing = true;
+                    target.currentTime = source.currentTime;
+                    syncing = false;
+                }}
+            }}
+            function wire(source, target) {{
+                source.addEventListener("play", () => {{
+                    target.play().catch(() => {{}});
+                }});
+                source.addEventListener("pause", () => target.pause());
+                source.addEventListener("seeked", () => syncTime(source, target));
+                source.addEventListener("timeupdate", () => syncTime(source, target));
+            }}
+            wire(a, b);
+            wire(b, a);
+        }})();
+        </script>
+        """,
+        height=480,
+    )
+
+
 def _mp4_max_height_label(max_height: int | None) -> str:
     if max_height == 1080:
         return "1080p maximum"
@@ -909,19 +998,6 @@ def show_mp4_compress_dialog() -> None:
     for warning in warnings:
         st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
 
-    has_output = bool(
-        st.session_state.get("mp4_output_path") and Path(st.session_state.mp4_output_path).exists()
-    )
-    if not has_output:
-        estimate = estimate_compress_size(probe, options)
-        saved_bytes = max(0, probe.file_size - estimate.estimated_bytes)
-        render_video_estimate_panel(
-            original=format_bytes(probe.file_size),
-            estimated=format_bytes(estimate.estimated_bytes),
-            savings_pct=f"~{estimate.savings_pct:.0f}% ({format_bytes(saved_bytes)})",
-            output_resolution=f"{estimate.output_width}×{estimate.output_height}",
-        )
-
     close_col, reset_col, compress_col = st.columns(3)
     with close_col:
         if st.button("CLOSE", key="mp4_close", use_container_width=True):
@@ -987,14 +1063,86 @@ def show_mp4_compress_dialog() -> None:
         )
 
         download_name = f"{Path(st.session_state.mp4_upload_name or 'video.mp4').stem}_compressed.mp4"
-        st.download_button(
-            "DOWNLOAD MP4",
-            data=Path(output_path).read_bytes(),
-            file_name=download_name,
-            mime="video/mp4",
-            key="mp4_download",
-            use_container_width=True,
+        compare_col, download_col = st.columns(2)
+        with compare_col:
+            if st.button(
+                "👁",
+                key="mp4_compare",
+                help="Compare before / after",
+                use_container_width=True,
+            ):
+                show_mp4_compare_dialog()
+        with download_col:
+            st.download_button(
+                "↓",
+                data=Path(output_path).read_bytes(),
+                file_name=download_name,
+                mime="video/mp4",
+                key="mp4_download",
+                help="Download compressed MP4",
+                use_container_width=True,
+            )
+
+
+@st.dialog("Compare MP4 — Before / After", width="large")
+def show_mp4_compare_dialog() -> None:
+    input_path = st.session_state.get("mp4_input_path")
+    output_path = st.session_state.get("mp4_output_path")
+    if not input_path or not output_path:
+        st.warning("No compressed video available to compare.")
+        return
+    original = Path(input_path)
+    compressed = Path(output_path)
+    if not original.exists() or not compressed.exists():
+        st.warning("Video files are missing.")
+        return
+
+    probe = probe_video(original)
+    output_probe = probe_video(compressed)
+    original_bytes = original.stat().st_size
+    output_bytes = compressed.stat().st_size
+    savings = (1 - output_bytes / original_bytes) * 100 if original_bytes > 0 else 0.0
+    safe_name = html.escape(st.session_state.get("mp4_upload_name") or original.name)
+
+    total_bytes = original_bytes + output_bytes
+    if total_bytes <= MP4_COMPARE_MAX_BYTES:
+        render_mp4_sync_compare_view(
+            original,
+            compressed,
+            orig_label=format_bytes(original_bytes),
+            compressed_label=format_bytes(output_bytes),
+            element_id=f"mp4cmp-{st.session_state.mp4_last_upload_id or 'vid'}",
         )
+    else:
+        st.markdown(
+            '<p class="upload-hint">Files are large — players are not synced in this mode.</p>',
+            unsafe_allow_html=True,
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('<div class="compare-title">Original</div>', unsafe_allow_html=True)
+            st.video(original.read_bytes())
+            st.markdown(
+                f'<div class="compare-label">{format_bytes(original_bytes)}</div>',
+                unsafe_allow_html=True,
+            )
+        with col2:
+            st.markdown('<div class="compare-title">Compressed</div>', unsafe_allow_html=True)
+            st.video(compressed.read_bytes())
+            st.markdown(
+                f'<div class="compare-label">{format_bytes(output_bytes)}</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown(
+        f'<div class="compare-stats">'
+        f"<strong>{safe_name}</strong><br>"
+        f"{format_bytes(original_bytes)} → <strong>{format_bytes(output_bytes)}</strong>"
+        f" · Saved <strong>{savings:.1f}%</strong>"
+        f" · {html.escape(probe.display_resolution)} → {html.escape(output_probe.display_resolution)}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 
 @st.dialog("Compare — Before / After", width="large")
