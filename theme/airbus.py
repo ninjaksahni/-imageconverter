@@ -913,6 +913,55 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
 }}
 .compare-stats strong {{ color: {GREEN}; }}
 
+/* MP4 compress dialog */
+.mp4-probe-grid {{
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.45rem;
+    margin: 0.65rem 0 0.85rem;
+}}
+.mp4-probe-cell {{
+    background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 2px;
+    padding: 0.45rem 0.55rem;
+}}
+.mp4-probe-label {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.55rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN}; margin-bottom: 0.2rem;
+}}
+.mp4-probe-value {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; font-weight: 600; color: {WHITE};
+}}
+.mp4-preset-hint {{
+    font-family: 'Inter', sans-serif; font-size: 0.72rem; color: {TEXT_MUTED};
+    margin: 0.25rem 0 0.65rem; line-height: 1.45;
+}}
+.mp4-auto-summary {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: {TEXT_MUTED};
+    padding: 0.45rem 0.55rem; border-left: 2px solid {CYAN};
+    background: rgba(0, 212, 255, 0.06); margin-bottom: 0.65rem;
+}}
+.mp4-results-panel {{
+    background: {BG_DEEP}; border: 1px solid {GREEN}; border-radius: 2px;
+    padding: 0.65rem 0.75rem; margin-top: 0.75rem;
+}}
+.mp4-results-title {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {GREEN}; margin-bottom: 0.45rem;
+}}
+.mp4-results-row {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; color: {TEXT_MUTED};
+    line-height: 1.65;
+}}
+.mp4-results-row strong {{ color: {GREEN}; }}
+[data-testid="stSidebar"] .mp4-sidebar-btn-anchor + .stButton > button {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.72rem !important; font-weight: 600 !important;
+    text-transform: uppercase !important; letter-spacing: 0.08em !important;
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="stSidebar"] .mp4-sidebar-btn-anchor + .stButton > button:hover {{
+    border-color: {GREEN} !important; color: {GREEN} !important;
+    box-shadow: 0 0 8px rgba(0, 200, 83, 0.25) !important;
+}}
+
 /* Empty + converting states */
 .empty-state {{
     text-align: center; padding: 2rem 1.25rem 1.75rem;
@@ -1207,6 +1256,74 @@ def render_results_summary(
                 Converted <strong>{converted}</strong><br>
                 {original} → <strong>{output}</strong><br>
                 Saved <strong>{saved}</strong>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_video_probe_panel(
+    *,
+    file_size: str,
+    resolution: str,
+    duration: str,
+    video_codec: str,
+    video_bitrate: str,
+    audio_bitrate: str,
+) -> None:
+    st.markdown(
+        f"""
+        <div class="mp4-probe-grid">
+            <div class="mp4-probe-cell">
+                <div class="mp4-probe-label">File size</div>
+                <div class="mp4-probe-value">{html.escape(file_size)}</div>
+            </div>
+            <div class="mp4-probe-cell">
+                <div class="mp4-probe-label">Resolution</div>
+                <div class="mp4-probe-value">{html.escape(resolution)}</div>
+            </div>
+            <div class="mp4-probe-cell">
+                <div class="mp4-probe-label">Duration</div>
+                <div class="mp4-probe-value">{html.escape(duration)}</div>
+            </div>
+            <div class="mp4-probe-cell">
+                <div class="mp4-probe-label">Video codec</div>
+                <div class="mp4-probe-value">{html.escape(video_codec)}</div>
+            </div>
+            <div class="mp4-probe-cell">
+                <div class="mp4-probe-label">Video bitrate</div>
+                <div class="mp4-probe-value">{html.escape(video_bitrate)}</div>
+            </div>
+            <div class="mp4-probe-cell">
+                <div class="mp4-probe-label">Audio bitrate</div>
+                <div class="mp4-probe-value">{html.escape(audio_bitrate)}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_video_results_panel(
+    *,
+    original_size: str,
+    compressed_size: str,
+    saved_mb: str,
+    savings_pct: str,
+    output_resolution: str,
+    output_codec: str,
+    elapsed: str,
+) -> None:
+    st.markdown(
+        f"""
+        <div class="mp4-results-panel">
+            <div class="mp4-results-title">Compression complete</div>
+            <div class="mp4-results-row">
+                {html.escape(original_size)} → <strong>{html.escape(compressed_size)}</strong><br>
+                Saved <strong>{html.escape(saved_mb)}</strong> ({html.escape(savings_pct)})<br>
+                Output <strong>{html.escape(output_resolution)}</strong> · {html.escape(output_codec)}<br>
+                Time <strong>{html.escape(elapsed)}</strong>
             </div>
         </div>
         """,

@@ -11,7 +11,7 @@ from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -49,7 +49,23 @@ from theme.airbus import (
     render_estimate_panel,
     render_results_summary,
     render_status_panel,
+    render_video_probe_panel,
+    render_video_results_panel,
     render_workflow_stepper,
+)
+from video_compressor import (
+    QUALITY_PRESETS,
+    VideoProbe,
+    check_ffmpeg_available,
+    cleanup_video_temp_dir,
+    compress_video,
+    create_video_temp_dir,
+    format_bitrate,
+    format_duration,
+    options_from_preset,
+    probe_video,
+    save_upload_to_temp,
+    validate_options,
 )
 
 MAX_FILES = 100
@@ -108,10 +124,28 @@ def init_batch_state() -> None:
         "grid_view_mode": "list",
         "sq_lossless": False,
         "sq_strip_metadata": False,
+        "mp4_temp_dir": None,
+        "mp4_input_path": None,
+        "mp4_output_path": None,
+        "mp4_upload_name": None,
+        "mp4_last_upload_id": None,
+        "mp4_compress_elapsed": None,
+        "mp4_result_warnings": [],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def clear_mp4_state() -> None:
+    cleanup_video_temp_dir(st.session_state.get("mp4_temp_dir"))
+    st.session_state.mp4_temp_dir = None
+    st.session_state.mp4_input_path = None
+    st.session_state.mp4_output_path = None
+    st.session_state.mp4_upload_name = None
+    st.session_state.mp4_last_upload_id = None
+    st.session_state.mp4_compress_elapsed = None
+    st.session_state.mp4_result_warnings = []
 
 
 def clear_active_preset() -> None:
@@ -729,6 +763,209 @@ def render_sync_compare_view(
         """,
         height=height,
     )
+
+
+def _mp4_max_height_label(max_height: int | None) -> str:
+    if max_height == 1080:
+        return "1080p maximum"
+    if max_height == 720:
+        return "720p maximum"
+    return "Original"
+
+
+def _load_mp4_probe() -> VideoProbe | None:
+    input_path = st.session_state.get("mp4_input_path")
+    if not input_path:
+        return None
+    try:
+        return probe_video(input_path)
+    except (OSError, RuntimeError):
+        return None
+
+
+@st.dialog("Compress MP4", width="large")
+def show_mp4_compress_dialog() -> None:
+    available, ffmpeg_msg = check_ffmpeg_available()
+    if not available:
+        st.error(ffmpeg_msg)
+        st.markdown(
+            '<p class="upload-hint">Install or repair FFmpeg locally:<br>'
+            "<code>brew install ffmpeg</code> or <code>brew reinstall ffmpeg</code><br>"
+            "<code>sudo apt install ffmpeg</code></p>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        '<p class="upload-hint">Upload one MP4 file. Output uses H.264 + web-optimized MP4 (+faststart).</p>',
+        unsafe_allow_html=True,
+    )
+
+    uploaded = st.file_uploader(
+        "Upload MP4",
+        type=["mp4"],
+        accept_multiple_files=False,
+        key="mp4_dialog_uploader",
+    )
+
+    if uploaded is not None:
+        upload_id = f"{uploaded.name}:{uploaded.size}"
+        if st.session_state.get("mp4_last_upload_id") != upload_id:
+            clear_mp4_state()
+            temp_dir = create_video_temp_dir()
+            st.session_state.mp4_temp_dir = str(temp_dir)
+            try:
+                input_path = save_upload_to_temp(temp_dir, uploaded.name, uploaded.getvalue())
+                probe_video(input_path)
+            except (OSError, RuntimeError) as exc:
+                cleanup_video_temp_dir(temp_dir)
+                st.session_state.mp4_temp_dir = None
+                st.error(f"Could not read video: {exc}")
+                return
+            st.session_state.mp4_input_path = str(input_path)
+            st.session_state.mp4_upload_name = uploaded.name
+            st.session_state.mp4_output_path = None
+            st.session_state.mp4_last_upload_id = upload_id
+            st.rerun()
+
+    probe = _load_mp4_probe()
+    if probe is None:
+        return
+
+    render_video_probe_panel(
+        file_size=format_bytes(probe.file_size),
+        resolution=probe.display_resolution,
+        duration=format_duration(probe.duration_s),
+        video_codec=probe.video_codec.upper(),
+        video_bitrate=format_bitrate(probe.effective_video_bitrate),
+        audio_bitrate=format_bitrate(probe.audio_bitrate) if probe.has_audio else "No audio",
+    )
+
+    preset_names = list(QUALITY_PRESETS.keys())
+    preset = st.radio(
+        "Quality preset",
+        preset_names,
+        index=preset_names.index("Balanced"),
+        key="mp4_quality_preset",
+    )
+    st.markdown(
+        f'<div class="mp4-preset-hint">{html.escape(str(QUALITY_PRESETS[preset]["description"]))}</div>',
+        unsafe_allow_html=True,
+    )
+
+    res_options = ["Original", "1080p maximum", "720p maximum"]
+    max_res_label = st.radio(
+        "Maximum resolution",
+        res_options,
+        horizontal=True,
+        key="mp4_max_resolution",
+        help="Never upscales — only reduces resolution when the source is larger.",
+    )
+    max_height_map = {
+        "Original": None,
+        "1080p maximum": 1080,
+        "720p maximum": 720,
+    }
+    max_height = max_height_map[max_res_label]
+
+    remove_audio = True
+    if probe.has_audio:
+        remove_audio = st.checkbox(
+            "Remove audio",
+            value=True,
+            key="mp4_remove_audio",
+            help="Product videos often do not need audio. Uncheck to keep AAC at 96 kbps.",
+        )
+
+    options = options_from_preset(
+        preset,
+        probe,
+        max_height=max_height,
+        remove_audio=remove_audio,
+    )
+    warnings = validate_options(probe, options)
+
+    if options.auto_selected:
+        cap_label = _mp4_max_height_label(options.max_height)
+        audio_label = "removed" if options.remove_audio else "AAC 96k"
+        st.markdown(
+            f'<div class="mp4-auto-summary">Auto selected: CRF <strong>{options.crf}</strong> · '
+            f"Max res <strong>{html.escape(cap_label)}</strong> · "
+            f"Audio <strong>{html.escape(audio_label)}</strong></div>",
+            unsafe_allow_html=True,
+        )
+
+    for warning in warnings:
+        st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
+
+    action_col, compress_col = st.columns(2)
+    with action_col:
+        if st.button("NEW FILE", key="mp4_reset", use_container_width=True):
+            clear_mp4_state()
+            st.rerun()
+    with compress_col:
+        compress_clicked = st.button("COMPRESS", type="primary", key="mp4_compress", use_container_width=True)
+
+    if compress_clicked:
+        temp_dir = Path(st.session_state.mp4_temp_dir)
+        stem = Path(st.session_state.mp4_upload_name or "video.mp4").stem
+        output_path = temp_dir / f"{stem}_compressed.mp4"
+        progress = st.progress(0.0)
+        status = st.empty()
+
+        def on_progress(ratio: float) -> None:
+            progress.progress(min(1.0, max(0.0, ratio)))
+            status.caption(f"Encoding… {int(ratio * 100)}%")
+
+        result = compress_video(
+            st.session_state.mp4_input_path,
+            output_path,
+            probe,
+            options,
+            on_progress=on_progress,
+        )
+        progress.empty()
+        status.empty()
+
+        if not result.success:
+            st.error(result.error or "Compression failed.")
+        else:
+            st.session_state.mp4_output_path = result.output_path
+            st.session_state.mp4_compress_elapsed = result.elapsed_s
+            st.session_state.mp4_result_warnings = result.warnings
+            st.rerun()
+
+    output_path = st.session_state.get("mp4_output_path")
+    if output_path and Path(output_path).exists():
+        for warning in st.session_state.get("mp4_result_warnings") or []:
+            st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
+
+        output_probe = probe_video(output_path)
+        original_bytes = probe.file_size
+        output_bytes = Path(output_path).stat().st_size
+        saved_bytes = max(0, original_bytes - output_bytes)
+        savings = (saved_bytes / original_bytes * 100) if original_bytes > 0 else 0.0
+        elapsed_s = float(st.session_state.get("mp4_compress_elapsed") or 0.0)
+
+        render_video_results_panel(
+            original_size=format_bytes(original_bytes),
+            compressed_size=format_bytes(output_bytes),
+            saved_mb=f"{saved_bytes / (1024 * 1024):.2f} MB",
+            savings_pct=f"{savings:.1f}%",
+            output_resolution=output_probe.display_resolution,
+            output_codec="H.264",
+            elapsed=f"{elapsed_s:.1f}s",
+        )
+
+        download_name = f"{Path(st.session_state.mp4_upload_name or 'video.mp4').stem}_compressed.mp4"
+        st.download_button(
+            "DOWNLOAD MP4",
+            data=Path(output_path).read_bytes(),
+            file_name=download_name,
+            mime="video/mp4",
+            key="mp4_download",
+            use_container_width=True,
+        )
 
 
 @st.dialog("Compare — Before / After", width="large")
@@ -1570,6 +1807,11 @@ with st.sidebar:
             if st.button(name, key=f"preset_{name}", use_container_width=True):
                 apply_compression_preset(name)
                 st.rerun()
+
+    st.markdown("### Video")
+    st.markdown('<div class="mp4-sidebar-btn-anchor"></div>', unsafe_allow_html=True)
+    if st.button("COMPRESS MP4", key="open_mp4_dialog", use_container_width=True):
+        show_mp4_compress_dialog()
 
     st.markdown('<div class="ecam-field-label">Mode</div>', unsafe_allow_html=True)
     quality_mode = st.radio(
