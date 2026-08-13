@@ -56,12 +56,14 @@ LIST_ROWS_PER_PAGE = 25
 
 GRID_FILTERS: dict[str, str] = {
     "all": "All",
-    "waiting": "Waiting",
+    "waiting": "Wait",
     "done": "Done",
-    "failed": "Failed",
-    "excluded": "Excluded",
-    "unsupported": "Unsupported",
+    "failed": "Fail",
+    "excluded": "Excl",
+    "unsupported": "Unsup",
 }
+
+SMALL_BATCH_THRESHOLD = 8
 
 COMPRESSION_PRESETS: dict[str, dict] = {
     "Max quality": {"mode": "Fixed quality", "quality": 95, "resize": 100, "target_kb": 200},
@@ -491,24 +493,42 @@ def _thumb_html(data: bytes | None) -> str:
     return f'<div class="thumb-frame"><img src="data:image/png;base64,{encoded}" alt="" /></div>'
 
 
+def _compare_original_bytes(result: ConversionResult) -> bytes | None:
+    info = st.session_state.batch_files.get(result.file_id)
+    if not info:
+        return None
+    return read_bytes(info)
+
+
 @st.dialog("Compare — Before / After", width="large")
 def show_compare_dialog(result: ConversionResult) -> None:
     safe_path = html.escape(result.relative_path)
     savings = f"{result.savings_pct:.1f}%" if result.savings_pct is not None else "—"
     mode = "Lossless" if st.session_state.get("sq_lossless") else f"Q{result.quality_used}"
+    original_bytes = _compare_original_bytes(result)
+    fit_width = st.radio(
+        "Display",
+        ["Fit width", "Full size"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"compare_view_{result.file_id}",
+    )
+    full_size = fit_width == "Full size"
+    img_cls = "compare-img-full" if full_size else "compare-img-fit"
+    st.markdown(f'<div class="{img_cls}-anchor"></div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('<div class="compare-title">Original</div>', unsafe_allow_html=True)
-        if result.original_preview:
-            st.image(result.original_preview, use_container_width=True)
+        if original_bytes:
+            st.image(original_bytes, use_container_width=not full_size)
         st.markdown(
             f'<div class="compare-label">{format_bytes(result.original_bytes)}</div>',
             unsafe_allow_html=True,
         )
     with c2:
         st.markdown('<div class="compare-title">WebP output</div>', unsafe_allow_html=True)
-        if result.webp_preview:
-            st.image(result.webp_preview, use_container_width=True)
+        if result.webp_data:
+            st.image(result.webp_data, use_container_width=not full_size)
         st.markdown(
             f'<div class="compare-label">{format_bytes(result.webp_bytes)}</div>',
             unsafe_allow_html=True,
@@ -521,6 +541,16 @@ def show_compare_dialog(result: ConversionResult) -> None:
         f"</div>",
         unsafe_allow_html=True,
     )
+
+
+def grid_column_count(item_count: int) -> int:
+    if item_count <= 1:
+        return 1
+    if item_count <= 2:
+        return 2
+    if item_count <= 3:
+        return 3
+    return CARDS_PER_ROW
 
 
 def card_html(
@@ -568,9 +598,11 @@ def render_thumbnail_grid(
     chunk = files[start : start + CARDS_PER_PAGE]
     excluded = st.session_state.excluded_zip_ids
 
+    row_width = grid_column_count(len(chunk))
     for row_start in range(0, len(chunk), CARDS_PER_ROW):
-        cols = st.columns(CARDS_PER_ROW)
-        for col, preview in zip(cols, chunk[row_start : row_start + CARDS_PER_ROW]):
+        row_items = chunk[row_start : row_start + CARDS_PER_ROW]
+        cols = st.columns(grid_column_count(len(row_items)))
+        for col, preview in zip(cols, row_items):
             with col:
                 badge, badge_class = card_badge(preview, results_by_id, live_status)
                 meta = card_meta(preview, results_by_id)
@@ -584,58 +616,82 @@ def render_thumbnail_grid(
                     data = preview.read_data()
                     thumb = cached_thumbnail(make_file_id(data), data)
 
-                if not read_only:
-                    st.markdown('<div class="remove-anchor"></div>', unsafe_allow_html=True)
-                    if st.button("×", key=f"rm_{preview.file_id}_{page}", help="Remove"):
-                        remove_batch_file(preview.file_id)
-                        st.rerun()
-
+                single_cls = " card-unit-single" if row_width == 1 else ""
+                state_cls = ""
+                if badge == "Failed":
+                    state_cls = " failed"
+                elif preview.unsupported_error:
+                    state_cls = " unsupported"
+                elif preview.file_id in excluded:
+                    state_cls = " excluded"
                 st.markdown(
-                    card_html(
-                        preview,
-                        badge,
-                        badge_class,
-                        meta,
-                        thumb,
-                        failed=badge == "Failed",
-                        unsupported=bool(preview.unsupported_error),
-                        excluded=preview.file_id in excluded,
-                    ),
+                    f'<div class="card-unit-anchor{single_cls}{state_cls}"></div>',
                     unsafe_allow_html=True,
                 )
+                with st.container(border=True):
+                    if not read_only:
+                        _sp, rm_col = st.columns([5, 1])
+                        with rm_col:
+                            if st.button("×", key=f"rm_{preview.file_id}_{page}", help="Remove"):
+                                remove_batch_file(preview.file_id)
+                                st.rerun()
 
-                if result and result.success and not read_only:
-                    st.markdown('<div class="card-actions">', unsafe_allow_html=True)
-                    a0, a1, a2, a3 = st.columns(4)
-                    with a0:
-                        if st.button("👁", key=f"pv_{preview.file_id}_{page}", help="Compare", use_container_width=True):
-                            show_compare_dialog(result)
-                    with a1:
-                        st.download_button(
-                            "↓",
-                            data=result.webp_data,
-                            file_name=basename_from_relative(result.webp_name),
-                            mime="image/webp",
-                            key=f"dl_{preview.file_id}_{page}",
-                            help="Download",
-                            use_container_width=True,
-                        )
-                    with a2:
-                        if st.button("↻", key=f"rc_{preview.file_id}_{page}", help="Re-convert", use_container_width=True):
-                            reconvert_file(preview.file_id, quality, resize_pct, target_kb)
-                            st.rerun()
-                    with a3:
-                        include = st.checkbox(
-                            "ZIP",
-                            value=preview.file_id not in excluded,
-                            key=f"zip_{preview.file_id}_{page}",
-                            label_visibility="collapsed",
-                        )
-                        if include:
-                            excluded.discard(preview.file_id)
-                        else:
-                            excluded.add(preview.file_id)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        card_html(
+                            preview,
+                            badge,
+                            badge_class,
+                            meta,
+                            thumb,
+                            failed=badge == "Failed",
+                            unsupported=bool(preview.unsupported_error),
+                            excluded=preview.file_id in excluded,
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+                    if result and result.success and not read_only:
+                        st.markdown('<div class="card-actions">', unsafe_allow_html=True)
+                        a0, a1, a2, a3 = st.columns(4)
+                        with a0:
+                            if st.button(
+                                "👁",
+                                key=f"pv_{preview.file_id}_{page}",
+                                help="Compare",
+                                use_container_width=True,
+                            ):
+                                show_compare_dialog(result)
+                        with a1:
+                            st.download_button(
+                                "↓",
+                                data=result.webp_data,
+                                file_name=basename_from_relative(result.webp_name),
+                                mime="image/webp",
+                                key=f"dl_{preview.file_id}_{page}",
+                                help="Download",
+                                use_container_width=True,
+                            )
+                        with a2:
+                            if st.button(
+                                "↻",
+                                key=f"rc_{preview.file_id}_{page}",
+                                help="Re-convert",
+                                use_container_width=True,
+                            ):
+                                reconvert_file(preview.file_id, quality, resize_pct, target_kb)
+                                st.rerun()
+                        with a3:
+                            include = st.checkbox(
+                                "ZIP",
+                                value=preview.file_id not in excluded,
+                                key=f"zip_{preview.file_id}_{page}",
+                                label_visibility="collapsed",
+                            )
+                            if include:
+                                excluded.discard(preview.file_id)
+                            else:
+                                excluded.add(preview.file_id)
+                        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_list_row_actions(
@@ -648,27 +704,38 @@ def render_list_row_actions(
     target_kb: int | None,
 ) -> None:
     excluded = st.session_state.excluded_zip_ids
+    st.markdown('<div class="list-actions-anchor"></div>', unsafe_allow_html=True)
     if result and result.success:
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4, c5 = st.columns([1.1, 0.9, 1, 1, 0.55])
         with c1:
-            if st.button("👁", key=f"lpv_{preview.file_id}_{page}", help="Compare"):
+            if st.button("Compare", key=f"lpv_{preview.file_id}_{page}", use_container_width=True):
                 show_compare_dialog(result)
         with c2:
-            st.download_button("↓", data=result.webp_data, file_name=basename_from_relative(result.webp_name),
-                mime="image/webp", key=f"ldl_{preview.file_id}_{page}", help="Download")
+            st.download_button(
+                "DL",
+                data=result.webp_data,
+                file_name=basename_from_relative(result.webp_name),
+                mime="image/webp",
+                key=f"ldl_{preview.file_id}_{page}",
+                help="Download",
+                use_container_width=True,
+            )
         with c3:
-            if st.button("↻", key=f"lrc_{preview.file_id}_{page}", help="Re-convert"):
+            if st.button("Retry", key=f"lrc_{preview.file_id}_{page}", use_container_width=True):
                 reconvert_file(preview.file_id, quality, resize_pct, target_kb)
                 st.rerun()
         with c4:
-            include = st.checkbox("ZIP", value=preview.file_id not in excluded, key=f"lzip_{preview.file_id}_{page}",
-                label_visibility="collapsed")
+            include = st.checkbox(
+                "ZIP",
+                value=preview.file_id not in excluded,
+                key=f"lzip_{preview.file_id}_{page}",
+            )
             if include:
                 excluded.discard(preview.file_id)
             else:
                 excluded.add(preview.file_id)
         with c5:
-            if st.button("×", key=f"lrm_{preview.file_id}_{page}", help="Remove"):
+            if st.button("×", key=f"lrm_{preview.file_id}_{page}", help="Remove", use_container_width=True):
                 remove_batch_file(preview.file_id)
                 st.rerun()
     else:
@@ -703,26 +770,37 @@ def render_list_view(
             data = preview.read_data()
             thumb = cached_thumbnail(make_file_id(data), data)
 
-        c_thumb, c_info, c_meta, c_act = st.columns([0.55, 2.4, 1.4, 2.2])
-        with c_thumb:
-            if thumb:
-                st.image(thumb, width=48)
-            else:
-                st.markdown("—")
-        with c_info:
-            st.markdown(
-                f'<span class="badge {badge_class}">{badge}</span> '
-                f'<span class="list-name" title="{html.escape(preview.relative_path)}">'
-                f"{html.escape(truncate_name(preview.relative_path, 36))}</span>",
-                unsafe_allow_html=True,
-            )
-        with c_meta:
-            st.markdown(f'<div class="list-meta">{html.escape(meta)}</div>', unsafe_allow_html=True)
-        with c_act:
-            render_list_row_actions(
-                preview, result, page, quality=quality, resize_pct=resize_pct, target_kb=target_kb
-            )
-        st.markdown('<hr style="margin:0.15rem 0 0.35rem;border-color:#3d4450;">', unsafe_allow_html=True)
+        state_cls = ""
+        if badge == "Failed":
+            state_cls = " list-row-fail"
+        elif preview.unsupported_error:
+            state_cls = " list-row-unsup"
+        elif preview.file_id in excluded:
+            state_cls = " list-row-excl"
+
+        st.markdown(f'<div class="list-row-anchor{state_cls}"></div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            c_thumb, c_info, c_meta, c_act = st.columns([0.5, 3.2, 1.5, 2.8])
+            with c_thumb:
+                if thumb:
+                    st.image(thumb, width=52)
+                else:
+                    st.markdown("—")
+            with c_info:
+                safe_path = html.escape(preview.relative_path)
+                st.markdown(
+                    f'<div class="list-info">'
+                    f'<span class="badge {badge_class}">{badge}</span> '
+                    f'<span class="list-name" title="{safe_path}">{safe_path}</span>'
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with c_meta:
+                st.markdown(f'<div class="list-meta">{html.escape(meta)}</div>', unsafe_allow_html=True)
+            with c_act:
+                render_list_row_actions(
+                    preview, result, page, quality=quality, resize_pct=resize_pct, target_kb=target_kb
+                )
 
 
 def render_filter_toolbar(
@@ -731,9 +809,25 @@ def render_filter_toolbar(
     live_status: dict[str, str] | None,
     *,
     disabled: bool = False,
+    compact: bool = False,
+    show_summary: bool = True,
 ) -> list[PreviewFile]:
     counts = count_by_filter(preview_files, results_by_id, live_status)
     active = st.session_state.grid_filter
+    filtered = filter_preview_files(preview_files, active, results_by_id, live_status)
+    total = len(preview_files)
+    shown = len(filtered)
+
+    if compact:
+        if active == "all":
+            summary = f"Showing <strong>{total}</strong> image{'s' if total != 1 else ''}"
+        else:
+            summary = (
+                f"Showing <strong>{shown}</strong> of <strong>{total}</strong> "
+                f"· {GRID_FILTERS[active]}"
+            )
+        st.markdown(f'<div class="filter-summary compact">{summary}</div>', unsafe_allow_html=True)
+        return filtered
 
     st.markdown('<div class="grid-toolbar">', unsafe_allow_html=True)
     st.markdown('<div class="grid-toolbar-label">Filter</div>', unsafe_allow_html=True)
@@ -750,9 +844,6 @@ def render_filter_toolbar(
                 set_grid_filter(key)
                 st.rerun()
 
-    filtered = filter_preview_files(preview_files, active, results_by_id, live_status)
-    total = len(preview_files)
-    shown = len(filtered)
     if active == "all":
         summary = f"Showing <strong>{total}</strong> image{'s' if total != 1 else ''}"
     else:
@@ -760,7 +851,8 @@ def render_filter_toolbar(
             f"Showing <strong>{shown}</strong> of <strong>{total}</strong> "
             f"· {GRID_FILTERS[active]}"
         )
-    st.markdown(f'<div class="filter-summary">{summary}</div>', unsafe_allow_html=True)
+    if show_summary:
+        st.markdown(f'<div class="filter-summary">{summary}</div>', unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
     return filtered
 
@@ -777,33 +869,43 @@ def render_bulk_toolbar(
     has_results = bool(results_by_id)
     failed_count = counts["failed"]
     unsupported_count = counts["unsupported"]
-    if not has_results and unsupported_count == 0:
+    successful_count = counts["done"] + counts["excluded"]
+
+    actions: list[tuple[str, object, bool]] = []
+    if has_results and successful_count > 1:
+        actions.extend([
+            ("ZIP ALL", bulk_zip_include_all, False),
+            ("ZIP NONE", bulk_zip_exclude_all, False),
+        ])
+    if has_results and failed_count > 0:
+        actions.extend([
+            ("RETRY FAIL", lambda: bulk_reconvert_failed(quality, resize_pct, target_kb), False),
+            ("RM FAIL", bulk_remove_failed, True),
+        ])
+    if unsupported_count > 0:
+        actions.append(("RM UNSUP", bulk_remove_unsupported, True))
+
+    if not actions:
         return
 
     st.markdown('<div class="bulk-bar-label">Bulk actions</div>', unsafe_allow_html=True)
-    actions: list[tuple[str, object, bool, bool]] = []
-    if has_results:
-        actions.extend([
-            ("ZIP ALL", bulk_zip_include_all, False, True),
-            ("ZIP NONE", bulk_zip_exclude_all, False, True),
-            ("RETRY FAIL", lambda: bulk_reconvert_failed(quality, resize_pct, target_kb), False, failed_count > 0),
-            ("RM FAIL", bulk_remove_failed, True, failed_count > 0),
-        ])
-    if unsupported_count > 0:
-        actions.append(("RM UNSUP", bulk_remove_unsupported, True, True))
-
-    cols = st.columns(len(actions))
-    for col, (label, callback, danger, enabled) in zip(cols, actions):
+    st.markdown('<div class="bulk-bar-anchor"></div>', unsafe_allow_html=True)
+    col_widths = [1] * len(actions) + [max(1, 6 - len(actions))]
+    cols = st.columns(col_widths)
+    for col, (label, callback, danger) in zip(cols, actions):
         with col:
             danger_cls = " bulk-danger" if danger else ""
             st.markdown(f'<div class="bulk-anchor{danger_cls}"></div>', unsafe_allow_html=True)
-            if st.button(label, key=f"bulk_{label.replace(' ', '_')}", use_container_width=True, disabled=not enabled):
+            if st.button(label, key=f"bulk_{label.replace(' ', '_')}", use_container_width=True):
                 callback()
                 st.rerun()
 
 
-def render_view_mode_toggle() -> None:
-    mode = st.session_state.grid_view_mode
+def render_view_mode_toggle(*, show: bool = True, active_mode: str | None = None) -> None:
+    if not show:
+        return
+    mode = active_mode if active_mode is not None else st.session_state.grid_view_mode
+    st.markdown('<div class="view-toggle-anchor"></div>', unsafe_allow_html=True)
     v1, v2 = st.columns(2)
     for col, key, label in ((v1, "grid", "Grid"), (v2, "list", "List")):
         with col:
@@ -822,67 +924,146 @@ def render_control_bar(
     has_batch: bool,
     has_results: bool,
     can_download: bool,
+    download_ready: bool = False,
+    convert_muted: bool = False,
+    settings_dirty: bool = False,
 ) -> bool:
     """Unified cockpit control bar. Returns True if convert was clicked."""
-    st.markdown('<div class="hmi-control-bar-anchor"></div>', unsafe_allow_html=True)
-    c_conv, c_clear, _sp, c_dl = st.columns([2.2, 1.1, 1.1, 2.2])
+    hide_convert = download_ready and can_download and not settings_dirty
+    convert_disabled = not can_convert or hide_convert
 
-    convert_clicked = False
-    with c_conv:
-        convert_clicked = st.button(
-            convert_label,
-            type="primary",
-            use_container_width=True,
-            disabled=not can_convert,
-            key="main_convert_btn",
-        )
-    with c_clear:
-        st.markdown('<div class="hmi-bar-clear-anchor"></div>', unsafe_allow_html=True)
-        st.button(
-            "CLR ALL",
-            type="secondary",
-            use_container_width=True,
-            disabled=not has_batch,
-            on_click=clear_all_files,
-            key="main_clear_btn",
-        )
-    with c_dl:
-        if has_results and can_download:
-            results = get_ordered_results()
-            successful = [r for r in results if r.success]
-            included = [r for r in successful if r.file_id not in st.session_state.excluded_zip_ids]
-            if included:
-                dl_ready_cls = " hmi-dl-ready" if st.session_state.get("download_ready") else ""
-                st.markdown(
-                    f'<div class="hmi-btn-anchor hmi-btn-dl-anchor{dl_ready_cls}"></div>',
-                    unsafe_allow_html=True,
-                )
-                st.download_button(
-                    f"DWNLD ZIP ({len(included)})",
-                    data=build_zip(results, st.session_state.excluded_zip_ids),
-                    file_name=zip_download_name(),
-                    mime="application/zip",
-                    type="primary",
+    with st.container(border=True):
+        st.markdown('<div class="hmi-control-bar-wrap"></div>', unsafe_allow_html=True)
+        c_conv, c_clear, c_dl = st.columns([2, 1, 2])
+
+        convert_clicked = False
+        with c_conv:
+            muted_cls = " hmi-convert-muted" if convert_muted or hide_convert else ""
+            st.markdown(f'<div class="hmi-convert-anchor{muted_cls}"></div>', unsafe_allow_html=True)
+            if not hide_convert:
+                convert_clicked = st.button(
+                    convert_label,
+                    type="secondary" if convert_muted else "primary",
                     use_container_width=True,
-                    on_click=on_zip_download,
-                    key="main_zip_download",
+                    disabled=convert_disabled,
+                    key="main_convert_btn",
                 )
-
-    st.markdown('<div class="hmi-control-bar-footer">', unsafe_allow_html=True)
-    footer_left, footer_right = st.columns([2, 1])
-    with footer_left:
+        with c_clear:
+            st.markdown('<div class="hmi-bar-clear-anchor"></div>', unsafe_allow_html=True)
+            st.button(
+                "CLR ALL",
+                type="secondary",
+                use_container_width=True,
+                disabled=not has_batch,
+                on_click=clear_all_files,
+                key="main_clear_btn",
+            )
+        with c_dl:
+            st.markdown('<div class="hmi-dl-col-anchor"></div>', unsafe_allow_html=True)
+            if has_results and can_download:
+                results = get_ordered_results()
+                successful = [r for r in results if r.success]
+                included = [r for r in successful if r.file_id not in st.session_state.excluded_zip_ids]
+                if included:
+                    dl_ready_cls = " hmi-dl-ready" if download_ready else ""
+                    st.markdown(
+                        f'<div class="hmi-btn-anchor hmi-btn-dl-anchor{dl_ready_cls}"></div>',
+                        unsafe_allow_html=True,
+                    )
+                    dl_label = f"DWNLD ZIP ({len(included)})"
+                    if download_ready:
+                        dl_label += " · READY"
+                    st.download_button(
+                        dl_label,
+                        data=build_zip(results, st.session_state.excluded_zip_ids),
+                        file_name=zip_download_name(),
+                        mime="application/zip",
+                        type="primary",
+                        use_container_width=True,
+                        on_click=on_zip_download,
+                        key="main_zip_download",
+                    )
         if has_results:
             st.checkbox(
                 "Clear batch after download",
                 key="clear_after_download",
                 help="Removes all files from the batch after you download the ZIP.",
             )
-    with footer_right:
-        if can_download and st.session_state.get("download_ready"):
-            st.markdown('<span class="ready">ZIP ready</span>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     return convert_clicked
+
+
+def effective_view_mode(file_count: int) -> str:
+    if file_count <= 2:
+        return "list"
+    return st.session_state.grid_view_mode
+
+
+def filter_status_summary(
+    preview_files: list[PreviewFile],
+    results_by_id: dict[str, ConversionResult],
+    live_status: dict[str, str] | None,
+) -> str:
+    active = st.session_state.grid_filter
+    filtered = filter_preview_files(preview_files, active, results_by_id, live_status)
+    total = len(preview_files)
+    shown = len(filtered)
+    if active == "all":
+        return f"Showing {total} image{'s' if total != 1 else ''}"
+    return f"Showing {shown} of {total} · {GRID_FILTERS[active]}"
+
+
+def render_grid_header(
+    preview_files: list[PreviewFile],
+    results_by_id: dict[str, ConversionResult],
+    live_status: dict[str, str] | None,
+    *,
+    effective_view: str,
+    show_view_toggle: bool,
+) -> None:
+    count = len(preview_files)
+    status = filter_status_summary(preview_files, results_by_id, live_status)
+    col_title, col_toggle = st.columns([5, 1.2])
+    with col_title:
+        st.markdown(
+            '<div class="grid-header-anchor"></div>'
+            f'<div class="grid-toolbar-header">'
+            f'<span class="grid-panel-title">Images ({count})</span>'
+            f'<span class="grid-header-status">· {html.escape(status)}</span>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with col_toggle:
+        if show_view_toggle:
+            render_view_mode_toggle(show=True, active_mode=effective_view)
+
+
+def should_collapse_bulk(
+    preview_files: list[PreviewFile],
+    results_by_id: dict[str, ConversionResult],
+) -> bool:
+    counts = count_by_filter(preview_files, results_by_id)
+    return counts["failed"] == 0 and counts["unsupported"] == 0
+
+
+def render_bulk_section(
+    preview_files: list[PreviewFile],
+    results_by_id: dict[str, ConversionResult],
+    *,
+    quality: int,
+    resize_pct: int,
+    target_kb: int | None,
+    in_expander: bool = False,
+) -> None:
+    if in_expander:
+        with st.expander("Bulk actions", expanded=False):
+            render_bulk_toolbar(
+                preview_files, results_by_id, quality=quality, resize_pct=resize_pct, target_kb=target_kb
+            )
+    else:
+        render_bulk_toolbar(
+            preview_files, results_by_id, quality=quality, resize_pct=resize_pct, target_kb=target_kb
+        )
 
 
 def run_conversion(
@@ -919,6 +1100,7 @@ def run_conversion(
                 has_results=False,
                 can_download=can_download,
                 converting=True,
+                download_ready=False,
             )
         with grid_placeholder.container():
             render_grid_block(
@@ -996,7 +1178,7 @@ def render_grid_block(
     has_results: bool,
     live_only: bool = False,
 ) -> None:
-    st.markdown('<div class="grid-panel">', unsafe_allow_html=True)
+    st.markdown('<div class="grid-panel-anchor"></div>', unsafe_allow_html=True)
 
     done_count = sum(1 for p in preview_files if p.file_id in results_by_id)
     if live_only:
@@ -1006,16 +1188,49 @@ def render_grid_block(
         )
         filtered_files = preview_files
     else:
-        h1, h2 = st.columns([2.5, 1])
-        with h1:
-            st.markdown(f'<div class="grid-panel-title">Images ({len(preview_files)})</div>', unsafe_allow_html=True)
-        with h2:
-            render_view_mode_toggle()
-
-        filtered_files = render_filter_toolbar(preview_files, results_by_id, live_status)
-        render_bulk_toolbar(
-            preview_files, results_by_id, quality=quality, resize_pct=resize_pct, target_kb=target_kb
+        small_batch = len(preview_files) <= SMALL_BATCH_THRESHOLD
+        effective_view = effective_view_mode(len(preview_files))
+        show_view_toggle = len(preview_files) > 2
+        render_grid_header(
+            preview_files,
+            results_by_id,
+            live_status,
+            effective_view=effective_view,
+            show_view_toggle=show_view_toggle,
         )
+
+        collapse_bulk = should_collapse_bulk(preview_files, results_by_id)
+
+        if small_batch:
+            active = st.session_state.grid_filter
+            filtered_files = filter_preview_files(
+                preview_files, active, results_by_id, live_status
+            )
+            with st.expander("Filter & bulk actions", expanded=False):
+                render_filter_toolbar(
+                    preview_files,
+                    results_by_id,
+                    live_status,
+                    show_summary=False,
+                )
+                render_bulk_section(
+                    preview_files,
+                    results_by_id,
+                    quality=quality,
+                    resize_pct=resize_pct,
+                    target_kb=target_kb,
+                    in_expander=False,
+                )
+        else:
+            filtered_files = render_filter_toolbar(preview_files, results_by_id, live_status)
+            render_bulk_section(
+                preview_files,
+                results_by_id,
+                quality=quality,
+                resize_pct=resize_pct,
+                target_kb=target_kb,
+                in_expander=collapse_bulk,
+            )
 
     if not filtered_files:
         st.markdown(
@@ -1024,10 +1239,10 @@ def render_grid_block(
             "</div>",
             unsafe_allow_html=True,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    per_page = LIST_ROWS_PER_PAGE if st.session_state.grid_view_mode == "list" else CARDS_PER_PAGE
+    use_list_view = effective_view_mode(len(filtered_files)) == "list"
+    per_page = LIST_ROWS_PER_PAGE if use_list_view else CARDS_PER_PAGE
     total_pages = max(1, math.ceil(len(filtered_files) / per_page))
     st.session_state.grid_page = min(page, total_pages - 1)
     page = st.session_state.grid_page
@@ -1043,7 +1258,7 @@ def render_grid_block(
             target_kb=target_kb,
             read_only=True,
         )
-    elif st.session_state.grid_view_mode == "list":
+    elif use_list_view:
         render_list_view(
             filtered_files,
             page,
@@ -1077,7 +1292,7 @@ def render_grid_block(
                 st.session_state.grid_page += 1
                 st.rerun()
 
-    if not live_only and has_results:
+    if not live_only and has_results and len(preview_files) > 5:
         with st.expander("Detailed table"):
             results = get_ordered_results()
             st.dataframe(
@@ -1095,8 +1310,6 @@ def render_grid_block(
                 use_container_width=True,
                 hide_index=True,
             )
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def settings_changed(quality, resize_pct, target_kb, quality_mode, encode_options: EncodeOptions) -> bool:
@@ -1251,6 +1464,7 @@ with stepper_slot.container():
         has_results=has_results,
         can_download=can_download,
         converting=False,
+        download_ready=bool(st.session_state.get("download_ready")),
     )
 
 new_uploads = st.file_uploader(
@@ -1285,9 +1499,12 @@ elif unsupported_files:
     st.markdown('<div class="advisory advisory-fail">No supported images in upload.</div>', unsafe_allow_html=True)
 
 can_convert = bool(supported_previews) and len(preview_files) <= MAX_FILES
-convert_label = "RE-CONVERT" if has_results else "CONVERT"
+settings_dirty = settings_changed(quality, resize_pct, target_kb, quality_mode, encode_options)
+convert_label = "RE-CONVERT" if has_results and settings_dirty else "CONVERT"
 armed = can_convert and not has_results
 st.session_state["convert_armed"] = armed
+download_ready_flag = bool(st.session_state.get("download_ready"))
+convert_muted = bool(has_results and can_download and download_ready_flag)
 
 convert_clicked = render_control_bar(
     convert_label=convert_label,
@@ -1295,6 +1512,9 @@ convert_clicked = render_control_bar(
     has_batch=bool(preview_files or has_results),
     has_results=has_results,
     can_download=can_download,
+    download_ready=download_ready_flag,
+    convert_muted=convert_muted,
+    settings_dirty=settings_dirty,
 )
 
 grid_slot = st.empty()
@@ -1327,9 +1547,8 @@ if preview_files and not (convert_clicked and can_convert):
         )
 elif not new_uploads:
     with grid_slot.container():
-        st.markdown('<div class="grid-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="grid-panel-anchor"></div>', unsafe_allow_html=True)
         render_empty_state()
-        st.markdown("</div>", unsafe_allow_html=True)
 
 if st.session_state.get("convert_armed"):
     render_convert_blink_css(True)

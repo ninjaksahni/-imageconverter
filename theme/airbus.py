@@ -164,12 +164,13 @@ section.stMain .block-container {{ padding-top: 2.5rem !important; }}
     margin-bottom: 0.25rem !important;
 }}
 [data-testid="stFileUploader"] section {{
-    border: 1px dashed {CYAN} !important; border-radius: 3px !important;
+    border: 1px solid {BORDER} !important; border-radius: 2px !important;
     background: {BG_DEEP} !important;
     padding: 1.5rem 1rem 1.35rem !important;
     min-height: 108px !important;
     overflow: visible !important;
 }}
+[data-testid="stFileUploader"] section:hover {{ border-color: {CYAN} !important; }}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] {{
     padding-top: 0.35rem !important;
     min-height: 72px !important;
@@ -178,7 +179,6 @@ section.stMain .block-container {{ padding-top: 2.5rem !important; }}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] {{
     padding-top: 0.15rem !important;
 }}
-[data-testid="stFileUploader"] section:hover {{ border-color: {GREEN} !important; }}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFile"],
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"],
 [data-testid="stFileUploader"] ul {{ display: none !important; }}
@@ -210,9 +210,9 @@ section.stMain .block-container {{ padding-top: 2.5rem !important; }}
 /* Airbus illuminated pushbuttons — main control bar */
 .hmi-btn-anchor {{ display: none; }}
 
-/* Convert button — black outline (st-key from Streamlit widget key) */
-[class*="st-key-main_convert_btn"] [data-testid="stButton"] > button,
-[class*="st-key-main_convert_btn"] button[data-testid="stBaseButton-primary"] {{
+/* Convert button — black outline; skip when muted */
+[data-testid="column"]:has(.hmi-convert-anchor):not(:has(.hmi-convert-muted)) [data-testid="stButton"] > button,
+[data-testid="column"]:has(.hmi-convert-anchor):not(:has(.hmi-convert-muted)) button[data-testid="stBaseButton-primary"] {{
     font-family: 'IBM Plex Mono', monospace !important;
     font-weight: 700 !important;
     font-size: 0.72rem !important;
@@ -227,15 +227,15 @@ section.stMain .block-container {{ padding-top: 2.5rem !important; }}
     min-height: 2.45rem !important;
     box-shadow: none !important;
 }}
-[class*="st-key-main_convert_btn"] [data-testid="stButton"] > button:disabled,
-[class*="st-key-main_convert_btn"] button[data-testid="stBaseButton-primary"]:disabled {{
+[data-testid="column"]:has(.hmi-convert-anchor):not(:has(.hmi-convert-muted)) [data-testid="stButton"] > button:disabled,
+[data-testid="column"]:has(.hmi-convert-anchor):not(:has(.hmi-convert-muted)) button[data-testid="stBaseButton-primary"]:disabled {{
     background: {BG_DEEP} !important;
     color: {TEXT_MUTED} !important;
     border: 1px solid {BORDER} !important;
     opacity: 0.5 !important;
 }}
-[class*="st-key-main_convert_btn"] button p,
-[class*="st-key-main_convert_btn"] button span {{
+[data-testid="column"]:has(.hmi-convert-anchor) button p,
+[data-testid="column"]:has(.hmi-convert-anchor) button span {{
     color: inherit !important;
     font-family: inherit !important;
     font-weight: inherit !important;
@@ -255,6 +255,8 @@ section.stMain .block-container {{ padding-top: 2.5rem !important; }}
 }}
 
 /* Download ZIP — black outline, steady green text */
+[class*="st-key-main_zip_download"] [data-testid="stDownloadButton"] > button,
+[class*="st-key-main_zip_download"] button[data-testid="stBaseButton-primary"],
 [data-testid="column"]:has(.hmi-btn-dl-anchor) [data-testid="stDownloadButton"] > button,
 [data-testid="column"]:has(.hmi-btn-dl-anchor) button[data-testid="stBaseButton-primary"] {{
     font-family: 'IBM Plex Mono', monospace !important;
@@ -272,14 +274,35 @@ section.stMain .block-container {{ padding-top: 2.5rem !important; }}
     box-shadow: none !important;
 }}
 [data-testid="column"]:has(.hmi-btn-dl-anchor) [data-testid="stDownloadButton"] > button:hover,
-[data-testid="column"]:has(.hmi-btn-dl-anchor) button[data-testid="stBaseButton-primary"]:hover {{
+[data-testid="column"]:has(.hmi-btn-dl-anchor) button[data-testid="stBaseButton-primary"]:hover,
+[class*="st-key-main_zip_download"] [data-testid="stDownloadButton"] > button:hover,
+[class*="st-key-main_zip_download"] button[data-testid="stBaseButton-primary"]:hover {{
     background: #000000 !important;
     border-color: {WHITE} !important;
 }}
 [data-testid="column"]:has(.hmi-btn-dl-anchor) [data-testid="stDownloadButton"] > button p,
-[data-testid="column"]:has(.hmi-btn-dl-anchor) button[data-testid="stBaseButton-primary"] p {{
+[data-testid="column"]:has(.hmi-btn-dl-anchor) button[data-testid="stBaseButton-primary"] p,
+[class*="st-key-main_zip_download"] [data-testid="stDownloadButton"] > button p,
+[class*="st-key-main_zip_download"] button[data-testid="stBaseButton-primary"] p {{
     color: {GREEN} !important;
     font-family: inherit !important;
+}}
+
+/* Muted convert when download is ready */
+[data-testid="column"]:has(.hmi-convert-muted) [data-testid="stButton"] > button,
+[data-testid="column"]:has(.hmi-convert-muted) button[data-testid="stBaseButton-secondary"],
+[data-testid="column"]:has(.hmi-convert-muted) button[data-testid="stBaseButton-primary"] {{
+    background: {BG_DEEP} !important;
+    color: {TEXT_MUTED} !important;
+    border: 1px solid {BORDER} !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    animation: none !important;
+}}
+[data-testid="column"]:has(.hmi-convert-muted) button p,
+[data-testid="column"]:has(.hmi-convert-muted) button span {{
+    color: {TEXT_MUTED} !important;
+    animation: none !important;
 }}
 
 @keyframes hmi-convert-blink {{
@@ -347,22 +370,65 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
 
 .actions-row {{ margin-bottom: 0.75rem; }}
 
-.grid-panel {{
-    background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 3px; padding: 0.75rem;
+.grid-panel-anchor {{ display: none; }}
+section.stMain div[data-testid="stVerticalBlock"]:has(> .stElementContainer .grid-panel-anchor) {{
+    background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 3px;
+    padding: 0.75rem; margin-bottom: 0.65rem; gap: 0.45rem !important;
 }}
 .grid-panel-title {{
     font-family: 'Inter', sans-serif; font-size: 0.68rem; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN};
-    margin-bottom: 0.65rem;
+    margin-bottom: 0;
+}}
+.grid-toolbar-header {{
+    display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap;
+}}
+.grid-header-anchor {{ display: none; }}
+[data-testid="stHorizontalBlock"]:has(.grid-header-anchor) {{
+    align-items: center !important; margin-bottom: 0.15rem;
+}}
+.grid-header-status {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};
 }}
 
 .thumb-card {{
+    background: transparent; border: none; border-radius: 0;
+    padding: 0; margin-bottom: 0; text-align: center;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) {{
+    margin-bottom: 0.5rem !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stVerticalBlock"] {{
+    gap: 0.35rem !important;
+}}
+.card-unit-anchor {{ display: none; }}
+[data-testid="column"]:has(.card-unit-single) {{
+    max-width: 300px !important;
+}}
+[data-testid="column"]:has(.card-unit-single) [data-testid="stVerticalBlockBorderWrapper"] {{
+    max-width: 300px;
+}}
+.thumb-card-inner {{
     background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 3px;
     padding: 0.5rem; margin-bottom: 0.35rem; text-align: center;
 }}
 .thumb-card.failed {{ border-color: {RED}; }}
 .thumb-card.unsupported {{ border-color: {AMBER}; }}
 .thumb-card.excluded {{ opacity: 0.5; }}
+.thumb-card.failed,
+.thumb-card.unsupported,
+.thumb-card.excluded {{
+    border: none;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor.failed) {{
+    border-color: {RED} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor.unsupported) {{
+    border-color: {AMBER} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor.excluded) {{
+    opacity: 0.55;
+}}
 .thumb-card .badge {{
     display: inline-block; font-family: 'IBM Plex Mono', monospace;
     font-size: 0.58rem; font-weight: 700; padding: 0.1rem 0.35rem;
@@ -389,11 +455,31 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
 }}
 .thumb-frame img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
 
-.card-actions {{ margin-top: 0.35rem; }}
+.card-actions {{
+    margin-top: 0.15rem; padding-top: 0.35rem;
+    border-top: 1px solid {BORDER};
+}}
 .card-actions [data-testid="column"] {{ padding: 0 0.1rem !important; }}
 .card-actions button, .card-actions [data-testid="stDownloadButton"] button {{
     font-size: 0.62rem !important; padding: 0.15rem 0.2rem !important;
-    min-height: 1.45rem !important; font-family: 'IBM Plex Mono', monospace !important;
+    min-height: 1.55rem !important; font-family: 'IBM Plex Mono', monospace !important;
+    background: {BG_DEEP} !important; border: 1px solid {BORDER} !important;
+    color: {TEXT_MUTED} !important;
+}}
+.card-actions button:hover, .card-actions [data-testid="stDownloadButton"] button:hover {{
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:first-of-type {{
+    margin-bottom: -0.25rem !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:first-of-type button {{
+    width: 1.35rem !important; height: 1.35rem !important; min-height: 1.35rem !important;
+    padding: 0 !important; font-size: 0.75rem !important; line-height: 1 !important;
+    background: {BG_PANEL} !important; border: 1px solid {BORDER} !important;
+    color: {TEXT_MUTED} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.card-unit-anchor) [data-testid="stHorizontalBlock"]:first-of-type button:hover {{
+    border-color: {RED} !important; color: {RED} !important;
 }}
 
 .advisory {{
@@ -432,7 +518,8 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
 .workflow-step .step-num {{
     display: inline-flex; align-items: center; justify-content: center;
     width: 1.15rem; height: 1.15rem; border-radius: 2px;
-    font-size: 0.58rem; font-weight: 700;
+    font-size: 0.58rem; font-weight: 700; line-height: 1;
+    padding: 0; font-variant-numeric: tabular-nums;
     border: 1px solid {BORDER}; color: {TEXT_MUTED}; background: {BG_DEEP};
 }}
 .workflow-step.done {{ color: {GREEN}; }}
@@ -529,7 +616,10 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
 }}
 .filter-summary {{
     font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};
-    margin: 0.35rem 0 0.55rem 0;
+    margin: 0.5rem 0 0.75rem 0;
+}}
+.filter-summary.compact {{
+    margin: 0 0 0.55rem 0;
 }}
 .filter-summary strong {{ color: {TEXT_PRIMARY}; }}
 
@@ -544,6 +634,12 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
     gap: 0.3rem !important;
     background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 2px;
     padding: 0.45rem 0.5rem; margin-bottom: 0.65rem;
+    max-width: 28rem;
+}}
+.bulk-bar-anchor {{ display: none; }}
+[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) + [data-testid="stHorizontalBlock"],
+div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHorizontalBlock"]:has(.bulk-anchor) {{
+    max-width: 28rem;
 }}
 [data-testid="column"]:has(.bulk-anchor) [data-testid="stButton"] button {{
     font-family: 'IBM Plex Mono', monospace !important;
@@ -586,42 +682,41 @@ section.stMain [class*="st-key-main_convert_btn"].hmi-convert-armed-wrap button:
     margin: 0.25rem 0 0 0; text-align: center;
     animation: hmi-border-pulse 1.2s ease-in-out infinite;
 }}
-[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] > button,
-[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) button[data-testid="stBaseButton-primary"] {{
-    animation: hmi-convert-blink 0.85s step-end infinite !important;
-}}
 
 /* Unified control bar */
-.hmi-control-bar-anchor {{ display: none; }}
-.hmi-control-bar-anchor + [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"]:first-of-type,
-div[data-testid="stVerticalBlock"]:has(> .stElementContainer .hmi-control-bar-anchor) > [data-testid="stHorizontalBlock"]:first-of-type {{
-    background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 3px;
-    padding: 0.55rem 0.65rem 0.45rem; margin: 0.65rem 0 0.35rem;
+.hmi-control-bar-wrap {{ display: none; }}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) {{
+    margin: 0.65rem 0 1.1rem 0 !important;
+    background: {BG_PANEL} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) > [data-testid="stVerticalBlock"] {{
+    gap: 0.45rem !important;
+    padding: 0.55rem 0.65rem 0.5rem !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) [data-testid="stHorizontalBlock"]:first-of-type {{
     align-items: center !important;
 }}
-.hmi-control-bar-footer {{
-    margin: 0.15rem 0 0.75rem 0; padding: 0 0.15rem;
-}}
-.hmi-control-bar-footer label[data-baseweb="checkbox"] {{
+.hmi-dl-col-anchor {{ display: none; }}
+[data-testid="column"]:has(.hmi-dl-col-anchor) label[data-baseweb="checkbox"] {{
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.58rem !important; text-transform: uppercase !important;
-    letter-spacing: 0.06em !important; color: {TEXT_MUTED} !important;
+    font-size: 0.56rem !important; text-transform: uppercase !important;
+    letter-spacing: 0.05em !important; color: {TEXT_MUTED} !important;
 }}
-.hmi-control-bar-footer .ready {{
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
-    color: {GREEN}; text-transform: uppercase; letter-spacing: 0.08em;
-    display: block; text-align: right; margin-top: 0.35rem;
-    animation: hmi-border-pulse 1.2s ease-in-out infinite;
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] > button,
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) button[data-testid="stBaseButton-primary"],
+[class*="st-key-main_zip_download"] button.hmi-convert-blink-active {{
+    animation: hmi-convert-blink 0.85s step-end infinite !important;
 }}
 [data-testid="column"]:has(.hmi-bar-clear-anchor) [data-testid="stButton"] button {{
     font-family: 'IBM Plex Mono', monospace !important; font-weight: 600 !important;
     font-size: 0.68rem !important; letter-spacing: 0.08em !important;
     text-transform: uppercase !important; background: {BG_DEEP} !important;
-    color: {TEXT_PRIMARY} !important; border: 1px solid {BORDER} !important;
+    color: {AMBER} !important; border: 1px solid {AMBER} !important;
     border-radius: 2px !important; min-height: 2.45rem !important;
 }}
 [data-testid="column"]:has(.hmi-bar-clear-anchor) [data-testid="stButton"] button:hover {{
-    border-color: {CYAN} !important; color: {CYAN} !important;
+    border-color: {WHITE} !important; color: {WHITE} !important;
+    background: rgba(255, 179, 0, 0.1) !important;
 }}
 [data-testid="column"]:has(.hmi-bar-cancel-anchor) [data-testid="stButton"] button {{
     font-family: 'IBM Plex Mono', monospace !important; font-weight: 600 !important;
@@ -631,25 +726,80 @@ div[data-testid="stVerticalBlock"]:has(> .stElementContainer .hmi-control-bar-an
     border-radius: 2px !important; min-height: 2.45rem !important;
 }}
 
-/* View mode toggle */
+/* View mode toggle — borderless segmented */
 .view-mode-anchor {{ display: none; }}
-.grid-header-row {{
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 0.55rem; gap: 0.5rem;
+.view-toggle-anchor {{ display: none; }}
+[data-testid="stColumn"]:has(.view-toggle-anchor) [data-testid="stHorizontalBlock"]:has(.view-mode-anchor),
+[data-testid="stVerticalBlock"]:has(.view-toggle-anchor) > [data-testid="stHorizontalBlock"] {{
+    gap: 0.2rem !important; background: transparent !important;
+    border: none !important; padding: 0 !important; margin: 0 !important;
 }}
 [data-testid="column"]:has(.view-mode-anchor) [data-testid="stButton"] button {{
     font-family: 'IBM Plex Mono', monospace !important; font-size: 0.56rem !important;
     font-weight: 600 !important; letter-spacing: 0.06em !important;
-    text-transform: uppercase !important; background: {BG_DEEP} !important;
-    color: {TEXT_MUTED} !important; border: 1px solid {BORDER} !important;
-    border-radius: 2px !important; min-height: 1.55rem !important; padding: 0.15rem 0.5rem !important;
+    text-transform: uppercase !important; background: transparent !important;
+    color: {TEXT_MUTED} !important; border: none !important;
+    border-radius: 0 !important; min-height: 1.35rem !important;
+    padding: 0.1rem 0.4rem !important; box-shadow: none !important;
+}}
+[data-testid="column"]:has(.view-mode-anchor) [data-testid="stButton"] button:hover {{
+    color: {CYAN} !important; background: transparent !important;
 }}
 [data-testid="column"]:has(.view-mode-anchor.view-active) [data-testid="stButton"] button {{
-    border-color: {GREEN} !important; color: {GREEN} !important;
-    background: rgba(0, 200, 83, 0.1) !important;
+    color: {GREEN} !important;
+    border-bottom: 2px solid {GREEN} !important;
+    background: transparent !important; box-shadow: none !important;
+}}
+[data-testid="stHorizontalBlock"]:has(.view-mode-anchor) {{
+    gap: 0.2rem !important; background: transparent !important;
+    border: none !important; padding: 0 !important;
 }}
 
 /* List view rows */
+.list-row-anchor {{ display: none; }}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.list-row-anchor) {{
+    margin-bottom: 0.45rem !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.list-row-anchor.list-row-fail) {{
+    border-color: {RED} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.list-row-anchor.list-row-unsup) {{
+    border-color: {AMBER} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.list-row-anchor.list-row-excl) {{
+    opacity: 0.55;
+}}
+.list-info {{
+    display: flex; align-items: center; gap: 0.45rem; min-width: 0;
+}}
+.list-name {{
+    font-family: 'Inter', sans-serif; font-size: 0.72rem; font-weight: 600;
+    color: {TEXT_PRIMARY}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0;
+}}
+.list-meta {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.66rem; color: {TEXT_MUTED};
+    white-space: nowrap; line-height: 1.4;
+}}
+.list-actions-anchor {{ display: none; }}
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stButton"] button,
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stDownloadButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.56rem !important; font-weight: 600 !important;
+    letter-spacing: 0.04em !important; text-transform: uppercase !important;
+    min-height: 1.85rem !important; padding: 0.2rem 0.35rem !important;
+    background: {BG_DEEP} !important; border: 1px solid {BORDER} !important;
+    color: {TEXT_MUTED} !important;
+}}
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stButton"] button:hover,
+[data-testid="column"]:has(.list-actions-anchor) [data-testid="stDownloadButton"] button:hover {{
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+[data-testid="column"]:has(.list-actions-anchor) label[data-baseweb="checkbox"] {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.56rem !important; font-weight: 600 !important;
+    text-transform: uppercase !important; color: {TEXT_MUTED} !important;
+}}
 .list-row {{
     display: grid; grid-template-columns: 52px 1fr auto auto;
     gap: 0.55rem; align-items: center;
@@ -688,6 +838,25 @@ div[data-testid="stVerticalBlock"]:has(> .stElementContainer .hmi-control-bar-an
     padding: 0.35rem; text-align: center; min-height: 120px;
 }}
 .compare-frame img {{ max-width: 100%; max-height: 220px; object-fit: contain; }}
+.compare-img-fit-anchor + [data-testid="stVerticalBlock"] [data-testid="stImage"] img,
+[data-testid="stDialog"] .compare-img-fit-anchor ~ * [data-testid="stImage"] img {{
+    max-height: 72vh !important;
+    width: 100% !important;
+    object-fit: contain !important;
+    image-rendering: auto !important;
+}}
+.compare-img-full-anchor ~ [data-testid="stVerticalBlock"] [data-testid="stImage"] img,
+[data-testid="stDialog"] [data-testid="stImage"] img {{
+    max-height: none !important;
+    width: auto !important;
+    max-width: 100% !important;
+    object-fit: none !important;
+    image-rendering: -webkit-optimize-contrast !important;
+}}
+[data-testid="stDialog"] [data-testid="stImage"] {{
+    overflow: auto !important;
+    max-height: 75vh !important;
+}}
 .compare-label {{
     font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; color: {TEXT_MUTED};
     margin-top: 0.35rem; text-transform: uppercase; letter-spacing: 0.08em;
@@ -747,17 +916,6 @@ div[data-testid="stVerticalBlock"]:has(> .stElementContainer .hmi-control-bar-an
     font-family: 'Inter', sans-serif; font-size: 0.82rem; color: {TEXT_MUTED};
     text-align: center; padding: 2rem 1rem;
 }}
-
-.remove-anchor {{ display: none; }}
-[data-testid="column"]:has(.remove-anchor) {{ position: relative; }}
-[data-testid="column"]:has(.remove-anchor) [data-testid="stButton"] {{
-    position: absolute; top: 0.2rem; right: 0.2rem; z-index: 2; width: auto !important;
-}}
-[data-testid="column"]:has(.remove-anchor) [data-testid="stButton"] button {{
-    width: 1.35rem !important; height: 1.35rem !important; min-height: 1.35rem !important;
-    padding: 0 !important; font-size: 0.7rem !important; border-radius: 2px !important;
-    background: {BG_PANEL} !important; border: 1px solid {BORDER} !important; color: {TEXT_MUTED} !important;
-}}
 """
 
 
@@ -806,9 +964,9 @@ def render_convert_blink_css(armed: bool) -> None:
             }
 
             function applyBlink() {
-                const wrap = doc.querySelector('[class*="st-key-main_convert_btn"]');
-                const btn = wrap && wrap.querySelector('button[data-testid="stBaseButton-primary"]');
-                if (btn && !btn.disabled) {
+                const col = doc.querySelector('[data-testid="column"]:has(.hmi-convert-anchor):not(:has(.hmi-convert-muted))');
+                const btn = col && col.querySelector('button[data-testid="stBaseButton-primary"]:not(:disabled)');
+                if (btn) {
                     btn.classList.add("hmi-convert-blink-active");
                 }
             }
@@ -900,18 +1058,20 @@ def render_workflow_stepper(
     has_results: bool,
     can_download: bool,
     converting: bool = False,
+    download_ready: bool = False,
 ) -> None:
     """Main-area UPLOAD → CONVERT → DOWNLOAD procedure strip."""
     upload_done = has_files
     convert_done = has_results and not converting
     upload_active = not has_files
     convert_active = (has_files and not has_results) or converting
-    download_active = has_results and can_download and not converting
+    download_done = has_results and can_download and download_ready and not converting
+    download_active = has_results and can_download and not converting and not download_done
 
     steps = [
         ("Upload", upload_done, upload_active, False),
         ("Convert", convert_done, convert_active, converting),
-        ("Download", False, download_active, False),
+        ("Download", download_done, download_active, False),
     ]
 
     parts: list[str] = []
