@@ -88,6 +88,14 @@ class VideoCompressOptions:
 
 
 @dataclass
+class VideoCompressEstimate:
+    estimated_bytes: int
+    savings_pct: float
+    output_width: int
+    output_height: int
+
+
+@dataclass
 class VideoCompressResult:
     success: bool
     output_path: str | None = None
@@ -368,6 +376,65 @@ def validate_options(probe: VideoProbe, options: VideoCompressOptions) -> list[s
             "Aggressive compression on an already-compressed source may reduce quality noticeably."
         )
     return warnings
+
+
+def output_dimensions(probe: VideoProbe, max_height: int | None) -> tuple[int, int]:
+    width, height = probe.width, probe.height
+    if max_height is None:
+        return width, height
+    max_dim = max(width, height)
+    if max_dim <= max_height:
+        return width, height
+    scale = max_height / max_dim
+    out_w = max(2, int(width * scale))
+    out_h = max(2, int(height * scale))
+    if out_w % 2:
+        out_w -= 1
+    if out_h % 2:
+        out_h -= 1
+    return max(2, out_w), max(2, out_h)
+
+
+def _crf_size_factor(crf: int) -> float:
+    return 2 ** ((23 - crf) / 6.0)
+
+
+def estimate_compress_size(probe: VideoProbe, options: VideoCompressOptions) -> VideoCompressEstimate:
+    duration = max(probe.duration_s, 0.1)
+    out_w, out_h = output_dimensions(probe, options.max_height)
+    source_pixels = max(1, probe.width * probe.height)
+    output_pixels = out_w * out_h
+    pixel_ratio = min(1.0, output_pixels / source_pixels)
+
+    source_vbitrate = probe.effective_video_bitrate
+    if not source_vbitrate:
+        source_vbitrate = int(probe.file_size * 8 * 0.85 / duration)
+
+    crf_factor = _crf_size_factor(options.crf)
+    if _is_heavily_compressed(probe) and options.crf >= 23:
+        crf_factor = max(crf_factor, 0.72)
+
+    est_video_bits = source_vbitrate * pixel_ratio * crf_factor * duration
+    if options.remove_audio or not probe.has_audio:
+        est_audio_bits = 0
+    else:
+        est_audio_bits = 96_000 * duration
+
+    estimated_bytes = int((est_video_bits + est_audio_bits) / 8)
+    estimated_bytes = min(estimated_bytes, probe.file_size)
+    if _is_heavily_compressed(probe):
+        estimated_bytes = max(estimated_bytes, int(probe.file_size * 0.72))
+    estimated_bytes = max(estimated_bytes, 50_000)
+
+    savings_pct = (1 - estimated_bytes / probe.file_size) * 100 if probe.file_size > 0 else 0.0
+    savings_pct = max(0.0, min(95.0, savings_pct))
+
+    return VideoCompressEstimate(
+        estimated_bytes=estimated_bytes,
+        savings_pct=savings_pct,
+        output_width=out_w,
+        output_height=out_h,
+    )
 
 
 def _scale_filter(probe: VideoProbe, max_height: int | None) -> str | None:

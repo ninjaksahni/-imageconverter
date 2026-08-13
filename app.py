@@ -49,6 +49,7 @@ from theme.airbus import (
     render_estimate_panel,
     render_results_summary,
     render_status_panel,
+    render_video_estimate_panel,
     render_video_probe_panel,
     render_video_results_panel,
     render_workflow_stepper,
@@ -60,6 +61,7 @@ from video_compressor import (
     cleanup_video_temp_dir,
     compress_video,
     create_video_temp_dir,
+    estimate_compress_size,
     format_bitrate,
     format_duration,
     options_from_preset,
@@ -131,6 +133,8 @@ def init_batch_state() -> None:
         "mp4_last_upload_id": None,
         "mp4_compress_elapsed": None,
         "mp4_result_warnings": [],
+        "mp4_dialog_open": False,
+        "mp4_uploader_key": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -783,8 +787,14 @@ def _load_mp4_probe() -> VideoProbe | None:
         return None
 
 
-@st.dialog("Compress MP4", width="large")
+def _dismiss_mp4_dialog() -> None:
+    st.session_state.mp4_dialog_open = False
+
+
+@st.dialog("Compress MP4", width="large", on_dismiss=_dismiss_mp4_dialog)
 def show_mp4_compress_dialog() -> None:
+    st.session_state.mp4_dialog_open = True
+
     available, ffmpeg_msg = check_ffmpeg_available()
     if not available:
         st.error(ffmpeg_msg)
@@ -805,7 +815,7 @@ def show_mp4_compress_dialog() -> None:
         "Upload MP4",
         type=["mp4"],
         accept_multiple_files=False,
-        key="mp4_dialog_uploader",
+        key=f"mp4_dialog_uploader_{st.session_state.mp4_uploader_key}",
     )
 
     if uploaded is not None:
@@ -826,7 +836,8 @@ def show_mp4_compress_dialog() -> None:
             st.session_state.mp4_upload_name = uploaded.name
             st.session_state.mp4_output_path = None
             st.session_state.mp4_last_upload_id = upload_id
-            st.rerun()
+            st.session_state.mp4_compress_elapsed = None
+            st.session_state.mp4_result_warnings = []
 
     probe = _load_mp4_probe()
     if probe is None:
@@ -898,10 +909,29 @@ def show_mp4_compress_dialog() -> None:
     for warning in warnings:
         st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
 
-    action_col, compress_col = st.columns(2)
-    with action_col:
+    has_output = bool(
+        st.session_state.get("mp4_output_path") and Path(st.session_state.mp4_output_path).exists()
+    )
+    if not has_output:
+        estimate = estimate_compress_size(probe, options)
+        saved_bytes = max(0, probe.file_size - estimate.estimated_bytes)
+        render_video_estimate_panel(
+            original=format_bytes(probe.file_size),
+            estimated=format_bytes(estimate.estimated_bytes),
+            savings_pct=f"~{estimate.savings_pct:.0f}% ({format_bytes(saved_bytes)})",
+            output_resolution=f"{estimate.output_width}×{estimate.output_height}",
+        )
+
+    close_col, reset_col, compress_col = st.columns(3)
+    with close_col:
+        if st.button("CLOSE", key="mp4_close", use_container_width=True):
+            st.session_state.mp4_dialog_open = False
+            st.rerun()
+    with reset_col:
         if st.button("NEW FILE", key="mp4_reset", use_container_width=True):
             clear_mp4_state()
+            st.session_state.mp4_uploader_key += 1
+            st.session_state.mp4_dialog_open = True
             st.rerun()
     with compress_col:
         compress_clicked = st.button("COMPRESS", type="primary", key="mp4_compress", use_container_width=True)
@@ -933,7 +963,6 @@ def show_mp4_compress_dialog() -> None:
             st.session_state.mp4_output_path = result.output_path
             st.session_state.mp4_compress_elapsed = result.elapsed_s
             st.session_state.mp4_result_warnings = result.warnings
-            st.rerun()
 
     output_path = st.session_state.get("mp4_output_path")
     if output_path and Path(output_path).exists():
@@ -1811,7 +1840,7 @@ with st.sidebar:
     st.markdown("### Video")
     st.markdown('<div class="mp4-sidebar-btn-anchor"></div>', unsafe_allow_html=True)
     if st.button("COMPRESS MP4", key="open_mp4_dialog", use_container_width=True):
-        show_mp4_compress_dialog()
+        st.session_state.mp4_dialog_open = True
 
     st.markdown('<div class="ecam-field-label">Mode</div>', unsafe_allow_html=True)
     quality_mode = st.radio(
@@ -2015,3 +2044,6 @@ if st.session_state.get("convert_armed"):
 
 if st.session_state.get("download_ready") and can_download:
     render_download_ready_css()
+
+if st.session_state.get("mp4_dialog_open"):
+    show_mp4_compress_dialog()
