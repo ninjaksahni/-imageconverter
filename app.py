@@ -1993,11 +1993,6 @@ with st.sidebar:
                 apply_compression_preset(name)
                 st.rerun()
 
-    st.markdown("### Video")
-    st.markdown('<div class="mp4-sidebar-btn-anchor"></div>', unsafe_allow_html=True)
-    if st.button("COMPRESS MP4", key="open_mp4_dialog", use_container_width=True):
-        st.session_state.mp4_dialog_open = True
-
     st.markdown('<div class="ecam-field-label">Mode</div>', unsafe_allow_html=True)
     quality_mode = st.radio(
         "Mode",
@@ -2040,6 +2035,11 @@ with st.sidebar:
         help="Remove EXIF and other embedded metadata from output.",
         on_change=clear_active_preset,
     )
+
+    st.markdown("### Video")
+    st.markdown('<div class="mp4-sidebar-btn-anchor"></div>', unsafe_allow_html=True)
+    if st.button("COMPRESS MP4", key="open_mp4_dialog", use_container_width=True):
+        st.session_state.mp4_dialog_open = True
 
 encode_options = get_encode_options()
 
