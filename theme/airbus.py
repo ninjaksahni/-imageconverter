@@ -696,6 +696,19 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
 [data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) [data-testid="stHorizontalBlock"]:first-of-type {{
     align-items: center !important;
 }}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"] {{
+    display: flex !important; align-items: center !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"] > [data-testid="stVerticalBlock"] {{
+    justify-content: center !important; width: 100% !important; gap: 0 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) [data-testid="stHorizontalBlock"]:first-of-type .element-container {{
+    margin: 0 !important; padding: 0 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) [data-testid="stDownloadButton"] > button,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hmi-control-bar-wrap) [data-testid="stButton"] > button {{
+    min-height: 2.45rem !important; margin: 0 !important;
+}}
 .hmi-dl-col-anchor {{ display: none; }}
 [data-testid="column"]:has(.hmi-dl-col-anchor) label[data-baseweb="checkbox"] {{
     font-family: 'IBM Plex Mono', monospace !important;

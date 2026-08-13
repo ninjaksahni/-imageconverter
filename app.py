@@ -934,13 +934,17 @@ def render_control_bar(
 
     with st.container(border=True):
         st.markdown('<div class="hmi-control-bar-wrap"></div>', unsafe_allow_html=True)
-        c_conv, c_clear, c_dl = st.columns([2, 1, 2])
-
         convert_clicked = False
-        with c_conv:
-            muted_cls = " hmi-convert-muted" if convert_muted or hide_convert else ""
-            st.markdown(f'<div class="hmi-convert-anchor{muted_cls}"></div>', unsafe_allow_html=True)
-            if not hide_convert:
+
+        if hide_convert:
+            c_clear, c_dl = st.columns([1, 2])
+            cols = {"clear": c_clear, "dl": c_dl}
+        else:
+            c_conv, c_clear, c_dl = st.columns([2, 1, 2])
+            cols = {"conv": c_conv, "clear": c_clear, "dl": c_dl}
+            with c_conv:
+                muted_cls = " hmi-convert-muted" if convert_muted else ""
+                st.markdown(f'<div class="hmi-convert-anchor{muted_cls}"></div>', unsafe_allow_html=True)
                 convert_clicked = st.button(
                     convert_label,
                     type="secondary" if convert_muted else "primary",
@@ -948,7 +952,8 @@ def render_control_bar(
                     disabled=convert_disabled,
                     key="main_convert_btn",
                 )
-        with c_clear:
+
+        with cols["clear"]:
             st.markdown('<div class="hmi-bar-clear-anchor"></div>', unsafe_allow_html=True)
             st.button(
                 "CLR ALL",
@@ -958,8 +963,7 @@ def render_control_bar(
                 on_click=clear_all_files,
                 key="main_clear_btn",
             )
-        with c_dl:
-            st.markdown('<div class="hmi-dl-col-anchor"></div>', unsafe_allow_html=True)
+        with cols["dl"]:
             if has_results and can_download:
                 results = get_ordered_results()
                 successful = [r for r in results if r.success]
@@ -967,7 +971,7 @@ def render_control_bar(
                 if included:
                     dl_ready_cls = " hmi-dl-ready" if download_ready else ""
                     st.markdown(
-                        f'<div class="hmi-btn-anchor hmi-btn-dl-anchor{dl_ready_cls}"></div>',
+                        f'<div class="hmi-dl-col-anchor hmi-btn-anchor hmi-btn-dl-anchor{dl_ready_cls}"></div>',
                         unsafe_allow_html=True,
                     )
                     dl_label = f"DWNLD ZIP ({len(included)})"
@@ -983,6 +987,8 @@ def render_control_bar(
                         on_click=on_zip_download,
                         key="main_zip_download",
                     )
+            else:
+                st.markdown('<div class="hmi-dl-col-anchor"></div>', unsafe_allow_html=True)
         if has_results:
             st.checkbox(
                 "Clear batch after download",
