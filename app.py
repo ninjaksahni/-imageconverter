@@ -2197,7 +2197,6 @@ with st.sidebar:
             "AVIF target",
             10,
             100,
-            value=50,
             format="%d%% of WebP",
             key="sq_avif_target_pct",
             on_change=clear_active_preset,
