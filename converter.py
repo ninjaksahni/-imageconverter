@@ -15,7 +15,12 @@ try:
     from pillow_heif import register_heif_opener
 
     register_heif_opener()
-except ImportError:
+except Exception:
+    pass
+
+try:
+    import pillow_avif  # noqa: F401
+except Exception:
     pass
 
 THUMBNAIL_SIZE = (96, 96)
