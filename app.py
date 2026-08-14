@@ -1142,8 +1142,9 @@ def show_mp4_compress_dialog() -> None:
         )
 
         download_name = f"{Path(st.session_state.mp4_upload_name or 'video.mp4').stem}_compressed.mp4"
+        st.markdown('<div class="mp4-download-anchor"></div>', unsafe_allow_html=True)
         st.download_button(
-            "↓ DOWNLOAD MP4",
+            "DOWNLOAD MP4",
             data=Path(output_path).read_bytes(),
             file_name=download_name,
             mime="video/mp4",
@@ -2037,7 +2038,7 @@ with st.sidebar:
     )
 
     st.markdown("### Video")
-    st.markdown('<div class="mp4-sidebar-btn-anchor"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="mp4-sidebar-panel-anchor"></div>', unsafe_allow_html=True)
     if st.button("COMPRESS MP4", key="open_mp4_dialog", use_container_width=True):
         st.session_state.mp4_dialog_open = True
 

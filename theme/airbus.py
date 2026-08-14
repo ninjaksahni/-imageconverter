@@ -288,6 +288,41 @@ section.stMain .block-container {{ padding-top: 2.5rem !important; }}
     font-family: inherit !important;
 }}
 
+/* MP4 dialog download — prominent green CTA */
+.mp4-download-anchor {{ display: none; }}
+[class*="st-key-mp4_download"] [data-testid="stDownloadButton"] > button,
+[class*="st-key-mp4_download"] button[data-testid="stBaseButton-secondary"] {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-weight: 700 !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    background: #000000 !important;
+    background-color: #000000 !important;
+    background-image: none !important;
+    color: {GREEN} !important;
+    border: 2px solid {GREEN} !important;
+    border-radius: 2px !important;
+    min-height: 2.75rem !important;
+    box-shadow: 0 0 16px rgba(0, 200, 83, 0.35), inset 0 0 14px rgba(0, 200, 83, 0.1) !important;
+    margin-top: 0.35rem !important;
+}}
+[class*="st-key-mp4_download"] [data-testid="stDownloadButton"] > button:hover,
+[class*="st-key-mp4_download"] button[data-testid="stBaseButton-secondary"]:hover {{
+    background: #000000 !important;
+    border-color: {WHITE} !important;
+    color: {WHITE} !important;
+    box-shadow: 0 0 20px rgba(0, 200, 83, 0.45), inset 0 0 16px rgba(0, 200, 83, 0.14) !important;
+}}
+[class*="st-key-mp4_download"] [data-testid="stDownloadButton"] > button p,
+[class*="st-key-mp4_download"] [data-testid="stDownloadButton"] > button span,
+[class*="st-key-mp4_download"] button[data-testid="stBaseButton-secondary"] p {{
+    color: inherit !important;
+    font-family: inherit !important;
+    font-weight: inherit !important;
+    letter-spacing: inherit !important;
+}}
+
 /* Muted convert when download is ready */
 [data-testid="column"]:has(.hmi-convert-muted) [data-testid="stButton"] > button,
 [data-testid="column"]:has(.hmi-convert-muted) button[data-testid="stBaseButton-secondary"],
@@ -961,15 +996,42 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     padding: 2.5rem 0.75rem; text-align: center; line-height: 1.5; min-height: 200px;
     display: flex; align-items: center; justify-content: center;
 }}
-[data-testid="stSidebar"] .mp4-sidebar-btn-anchor + .stButton > button {{
-    font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.72rem !important; font-weight: 600 !important;
-    text-transform: uppercase !important; letter-spacing: 0.08em !important;
-    border-color: {CYAN} !important; color: {CYAN} !important;
+.mp4-sidebar-panel-anchor {{ display: none; }}
+[data-testid="stSidebar"] div[data-testid="stVerticalBlock"]:has(> .stElementContainer .mp4-sidebar-panel-anchor) {{
+    background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 2px;
+    padding: 0.55rem 0.65rem 0.65rem; margin-top: 0.35rem; margin-bottom: 0.15rem;
 }}
-[data-testid="stSidebar"] .mp4-sidebar-btn-anchor + .stButton > button:hover {{
-    border-color: {GREEN} !important; color: {GREEN} !important;
-    box-shadow: 0 0 8px rgba(0, 200, 83, 0.25) !important;
+[data-testid="stSidebar"] [class*="st-key-open_mp4_dialog"] [data-testid="stButton"] > button,
+[data-testid="stSidebar"] [class*="st-key-open_mp4_dialog"] button[data-testid="stBaseButton-secondary"] {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-weight: 700 !important;
+    font-size: 0.72rem !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    background: #000000 !important;
+    background-color: #000000 !important;
+    background-image: none !important;
+    color: {CYAN} !important;
+    border: 2px solid {CYAN} !important;
+    border-radius: 2px !important;
+    min-height: 2.5rem !important;
+    box-shadow: inset 0 0 14px rgba(0, 212, 255, 0.08) !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease !important;
+}}
+[data-testid="stSidebar"] [class*="st-key-open_mp4_dialog"] [data-testid="stButton"] > button:hover,
+[data-testid="stSidebar"] [class*="st-key-open_mp4_dialog"] button[data-testid="stBaseButton-secondary"]:hover {{
+    background: #000000 !important;
+    border-color: {GREEN} !important;
+    color: {GREEN} !important;
+    box-shadow: 0 0 12px rgba(0, 200, 83, 0.3), inset 0 0 16px rgba(0, 200, 83, 0.1) !important;
+}}
+[data-testid="stSidebar"] [class*="st-key-open_mp4_dialog"] [data-testid="stButton"] > button p,
+[data-testid="stSidebar"] [class*="st-key-open_mp4_dialog"] [data-testid="stButton"] > button span,
+[data-testid="stSidebar"] [class*="st-key-open_mp4_dialog"] button[data-testid="stBaseButton-secondary"] p {{
+    color: inherit !important;
+    font-family: inherit !important;
+    font-weight: inherit !important;
+    letter-spacing: inherit !important;
 }}
 
 /* Empty + converting states */
