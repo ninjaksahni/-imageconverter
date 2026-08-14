@@ -20,6 +20,9 @@ from converter import (
     DEFAULT_QUALITY,
     BatchEstimate,
     ConversionResult,
+    OUTPUT_FORMAT_AVIF,
+    OUTPUT_FORMAT_BOTH,
+    OUTPUT_FORMAT_WEBP,
     EncodeOptions,
     FileEstimate,
     _run_convert_job,
@@ -31,6 +34,7 @@ from converter import (
     find_quality_for_target_size,
     format_bytes,
     make_thumbnail,
+    resolve_encode_quality,
     validate_image,
 )
 from storage import (
@@ -85,6 +89,13 @@ GRID_FILTERS: dict[str, str] = {
 
 SMALL_BATCH_THRESHOLD = 8
 
+OUTPUT_FORMAT_CHOICES = ["WebP only", "AVIF only", "WebP + AVIF"]
+OUTPUT_FORMAT_MAP = {
+    "WebP only": OUTPUT_FORMAT_WEBP,
+    "AVIF only": OUTPUT_FORMAT_AVIF,
+    "WebP + AVIF": OUTPUT_FORMAT_BOTH,
+}
+
 COMPRESSION_PRESETS: dict[str, dict] = {
     "Max quality": {"mode": "Fixed quality", "quality": 95, "resize": 100, "target_kb": 200},
     "Web": {"mode": "Fixed quality", "quality": 80, "resize": 100, "target_kb": 200},
@@ -125,6 +136,8 @@ def init_batch_state() -> None:
         "grid_view_mode": "list",
         "sq_lossless": False,
         "sq_strip_metadata": False,
+        "sq_output_format": "WebP only",
+        "sq_avif_target_pct": 50,
         "mp4_temp_dir": None,
         "mp4_input_path": None,
         "mp4_output_path": None,
@@ -157,6 +170,12 @@ def clear_active_preset() -> None:
     st.session_state.active_preset = None
 
 
+def on_output_format_change() -> None:
+    clear_active_preset()
+    if st.session_state.get("sq_output_format") == "WebP + AVIF":
+        st.session_state.sq_avif_target_pct = 50
+
+
 def apply_compression_preset(name: str) -> None:
     preset = COMPRESSION_PRESETS[name]
     st.session_state.sq_mode = preset["mode"]
@@ -180,11 +199,103 @@ def add_file_to_batch(relative_path: str, data: bytes) -> bool:
     return True
 
 
+def get_output_format_key() -> str:
+    label = st.session_state.get("sq_output_format", "WebP only")
+    return OUTPUT_FORMAT_MAP.get(label, OUTPUT_FORMAT_WEBP)
+
+
 def get_encode_options() -> EncodeOptions:
-    return EncodeOptions(
+    return EncodeOptions.from_output_format(
+        get_output_format_key(),
         lossless=bool(st.session_state.get("sq_lossless")),
         strip_metadata=bool(st.session_state.get("sq_strip_metadata")),
+        avif_target_webp_pct=int(st.session_state.get("sq_avif_target_pct", 50)),
     )
+
+
+def result_quality_label(result: ConversionResult) -> str:
+    if result.quality_used >= 100 and (not result.avif_bytes or result.avif_quality_used >= 100):
+        return "Lossless"
+    if result.webp_bytes > 0 and result.avif_bytes > 0 and result.avif_quality_used:
+        return f"Q{result.quality_used} · AVIF Q{result.avif_quality_used}"
+    quality = result.avif_quality_used or result.quality_used
+    return f"Q{quality}"
+
+
+def result_output_size_label(result: ConversionResult) -> str:
+    parts: list[str] = []
+    if result.webp_bytes > 0:
+        label = format_bytes(result.webp_bytes)
+        if result.avif_bytes > 0:
+            label += " webp"
+        parts.append(label)
+    if result.avif_bytes > 0:
+        label = format_bytes(result.avif_bytes)
+        if result.webp_bytes > 0:
+            label += " avif"
+        parts.append(label)
+    return " · ".join(parts) if parts else "—"
+
+
+def zip_output_bytes(result: ConversionResult) -> int:
+    total = 0
+    if result.webp_data:
+        total += result.webp_bytes
+    if result.avif_data:
+        total += result.avif_bytes
+    return total
+
+
+def render_result_downloads(
+    result: ConversionResult,
+    *,
+    key_prefix: str,
+    page: int,
+) -> None:
+    has_webp = bool(result.webp_data)
+    has_avif = bool(result.avif_data)
+    if has_webp and has_avif:
+        w_col, a_col = st.columns(2)
+        with w_col:
+            st.download_button(
+                "W",
+                data=result.webp_data,
+                file_name=basename_from_relative(result.webp_name),
+                mime="image/webp",
+                key=f"{key_prefix}_w_{result.file_id}_{page}",
+                help="Download WebP",
+                use_container_width=True,
+            )
+        with a_col:
+            st.download_button(
+                "A",
+                data=result.avif_data,
+                file_name=basename_from_relative(result.avif_name),
+                mime="image/avif",
+                key=f"{key_prefix}_a_{result.file_id}_{page}",
+                help="Download AVIF",
+                use_container_width=True,
+            )
+    elif has_avif:
+        st.download_button(
+            "↓",
+            data=result.avif_data,
+            file_name=basename_from_relative(result.avif_name),
+            mime="image/avif",
+            key=f"{key_prefix}_{result.file_id}_{page}",
+            help="Download AVIF",
+            use_container_width=True,
+        )
+    else:
+        st.download_button(
+            "↓",
+            data=result.webp_data,
+            file_name=basename_from_relative(result.webp_name),
+            mime="image/webp",
+            key=f"{key_prefix}_{result.file_id}_{page}",
+            help="Download WebP",
+            use_container_width=True,
+        )
 
 
 def merge_new_uploads(uploaded: list) -> tuple[bool, int]:
@@ -341,10 +452,21 @@ def reconvert_file(file_id: str, quality: int, resize_pct: int, target_kb: int |
         return
     data = read_bytes(info)
     target_bytes = target_kb * 1024 if target_kb else None
-    effective_quality = quality
-    if target_bytes:
-        effective_quality = find_quality_for_target_size(data, target_bytes, resize_pct=resize_pct)
-    used = {r.webp_name for r in st.session_state.results_by_id.values() if r.file_id != file_id}
+    encode_options = get_encode_options()
+    effective_quality = resolve_encode_quality(
+        quality,
+        encode_options=encode_options,
+        target_bytes=target_bytes,
+        file_bytes=data,
+        resize_pct=resize_pct,
+    )
+    used: set[str] = set()
+    for existing in st.session_state.results_by_id.values():
+        if existing.file_id != file_id:
+            if existing.webp_name:
+                used.add(existing.webp_name)
+            if existing.avif_name:
+                used.add(existing.avif_name)
     result = convert_image(
         data,
         info["relative_path"],
@@ -414,7 +536,9 @@ def card_meta(preview: PreviewFile, results_by_id: dict[str, ConversionResult]) 
     if preview.file_id in results_by_id:
         result = results_by_id[preview.file_id]
         if result.success:
-            return f"{format_bytes(result.original_bytes)} → {format_bytes(result.webp_bytes)}"
+            return (
+                f"{format_bytes(result.original_bytes)} → {result_output_size_label(result)}"
+            )
         return result.error or "Failed"
     if preview.estimate:
         return (
@@ -431,9 +555,14 @@ def cached_batch_estimate(
     settings_key: tuple,
     file_data: tuple[tuple[str, bytes], ...],
 ) -> tuple[tuple[str, int, int, float], ...]:
-    _, quality, resize_pct, target_kb, lossless, strip_metadata = settings_key
+    _, quality, resize_pct, target_kb, lossless, strip_metadata, output_webp, output_avif = settings_key
     target_bytes = target_kb * 1024 if target_kb else None
-    encode_options = EncodeOptions(lossless=lossless, strip_metadata=strip_metadata)
+    encode_options = EncodeOptions(
+        lossless=lossless,
+        strip_metadata=strip_metadata,
+        output_webp=output_webp,
+        output_avif=output_avif,
+    )
     batch = estimate_batch(
         list(file_data),
         quality=quality,
@@ -463,7 +592,16 @@ def load_estimates(
     encode_options: EncodeOptions,
 ) -> tuple[BatchEstimate, dict[str, FileEstimate]]:
     rows = cached_batch_estimate(
-        (file_ids, quality, resize_pct, target_kb, encode_options.lossless, encode_options.strip_metadata),
+        (
+            file_ids,
+            quality,
+            resize_pct,
+            target_kb,
+            encode_options.lossless,
+            encode_options.strip_metadata,
+            encode_options.output_webp,
+            encode_options.output_avif,
+        ),
         tuple(file_data),
     )
     files = [FileEstimate(name, original, webp) for name, original, webp, _ in rows]
@@ -560,10 +698,20 @@ def _image_data_uri(data: bytes) -> str:
         "PNG": "image/png",
         "GIF": "image/gif",
         "WEBP": "image/webp",
+        "AVIF": "image/avif",
+        "HEIF": "image/heif",
     }
     mime = mime_map.get(fmt, "image/png")
     encoded = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{encoded}"
+
+
+def _compare_column_width(panel_count: int) -> int:
+    if panel_count <= 1:
+        return 760
+    if panel_count == 2:
+        return 380
+    return 250
 
 
 def _compare_loupe_height(data: bytes, *, column_width: int = 380) -> int:
@@ -577,22 +725,47 @@ def _compare_loupe_height(data: bytes, *, column_width: int = 380) -> int:
     return min(max(display_height + 20, 160), 720)
 
 
-def _compare_view_height(original: bytes, webp: bytes) -> int:
-    return max(_compare_loupe_height(original), _compare_loupe_height(webp)) + 72
+def _compare_view_height(images: list[bytes]) -> int:
+    panel_count = max(len(images), 1)
+    column_width = _compare_column_width(panel_count)
+    heights = [_compare_loupe_height(image, column_width=column_width) for image in images]
+    return max(heights, default=320) + 72
+
+
+def _compare_panel_html(*, title: str, data: bytes, label: str, side: str) -> str:
+    uri = _image_data_uri(data)
+    return f"""
+                <div class="compare-panel">
+                    <div class="compare-panel-title">{html.escape(title)}</div>
+                    <div class="compare-loupe-wrap" data-side="{html.escape(side)}">
+                        <img class="compare-loupe-img" src="{uri}" alt="" />
+                        <div class="compare-loupe-glass"></div>
+                        <div class="compare-mag-badge"></div>
+                    </div>
+                    <div class="compare-panel-label">{html.escape(label)}</div>
+                </div>"""
 
 
 def render_sync_compare_view(
-    original_bytes: bytes,
-    webp_bytes: bytes,
+    panels: list[tuple[str, bytes, str, str]],
     *,
-    orig_label: str,
-    webp_label: str,
     element_id: str,
 ) -> None:
-    orig_uri = _image_data_uri(original_bytes)
-    webp_uri = _image_data_uri(webp_bytes)
+    """Render synced loupe compare for one or more output panels.
+
+    Each panel is ``(title, image_bytes, size_label, side_id)``.
+    """
+    if not panels:
+        return
+
     safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", element_id)
-    height = _compare_view_height(original_bytes, webp_bytes)
+    panel_count = len(panels)
+    panels_html = "".join(
+        _compare_panel_html(title=title, data=data, label=label, side=side)
+        for title, data, label, side in panels
+    )
+    image_bytes = [data for _, data, _, _ in panels]
+    height = _compare_view_height(image_bytes)
     components.html(
         f"""
         <style>
@@ -604,7 +777,10 @@ def render_sync_compare_view(
             color: #8b939e; margin-bottom: 0.45rem;
         }}
         .compare-sync-panels {{
-            display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;
+            display: grid; grid-template-columns: repeat({panel_count}, minmax(0, 1fr)); gap: 0.65rem;
+        }}
+        .compare-panel {{
+            min-width: 0;
         }}
         .compare-panel-title {{
             font-size: 0.62rem; font-weight: 600; text-transform: uppercase;
@@ -639,24 +815,7 @@ def render_sync_compare_view(
         <div class="compare-sync-root" id="root-{safe_id}">
             <div class="compare-sync-hint">Scroll to zoom · hover to compare</div>
             <div class="compare-sync-panels" id="panels-{safe_id}">
-                <div class="compare-panel">
-                    <div class="compare-panel-title">Original</div>
-                    <div class="compare-loupe-wrap" data-side="orig">
-                        <img class="compare-loupe-img" src="{orig_uri}" alt="" />
-                        <div class="compare-loupe-glass"></div>
-                        <div class="compare-mag-badge"></div>
-                    </div>
-                    <div class="compare-panel-label">{html.escape(orig_label)}</div>
-                </div>
-                <div class="compare-panel">
-                    <div class="compare-panel-title">WebP output</div>
-                    <div class="compare-loupe-wrap" data-side="webp">
-                        <img class="compare-loupe-img" src="{webp_uri}" alt="" />
-                        <div class="compare-loupe-glass"></div>
-                        <div class="compare-mag-badge"></div>
-                    </div>
-                    <div class="compare-panel-label">{html.escape(webp_label)}</div>
-                </div>
+                {panels_html}
             </div>
         </div>
         <script>
@@ -1154,24 +1313,32 @@ def show_mp4_compress_dialog() -> None:
         )
 
 
-@st.dialog("Compare — Before / After", width="large")
+@st.dialog("Compare", width="large")
 def show_compare_dialog(result: ConversionResult) -> None:
     safe_path = html.escape(result.relative_path)
     savings = f"{result.savings_pct:.1f}%" if result.savings_pct is not None else "—"
-    mode = "Lossless" if st.session_state.get("sq_lossless") else f"Q{result.quality_used}"
+    mode = result_quality_label(result)
     original_bytes = _compare_original_bytes(result)
-    if original_bytes and result.webp_data:
-        render_sync_compare_view(
-            original_bytes,
-            result.webp_data,
-            orig_label=format_bytes(result.original_bytes),
-            webp_label=format_bytes(result.webp_bytes),
-            element_id=f"cmp-{result.file_id}",
+    compare_panels: list[tuple[str, bytes, str, str]] = []
+    if original_bytes:
+        compare_panels.append(
+            ("Original", original_bytes, format_bytes(result.original_bytes), "orig")
         )
+    if result.webp_data:
+        compare_panels.append(
+            ("WebP output", result.webp_data, format_bytes(result.webp_bytes), "webp")
+        )
+    if result.avif_data:
+        compare_panels.append(
+            ("AVIF output", result.avif_data, format_bytes(result.avif_bytes), "avif")
+        )
+    if compare_panels:
+        render_sync_compare_view(compare_panels, element_id=f"cmp-{result.file_id}")
+    output_summary = result_output_size_label(result)
     st.markdown(
         f'<div class="compare-stats">'
         f"<strong>{html.escape(safe_path)}</strong><br>"
-        f"{format_bytes(result.original_bytes)} → <strong>{format_bytes(result.webp_bytes)}</strong>"
+        f"{format_bytes(result.original_bytes)} → <strong>{html.escape(output_summary)}</strong>"
         f" · Saved <strong>{savings}</strong> · {mode}"
         f"</div>",
         unsafe_allow_html=True,
@@ -1244,7 +1411,7 @@ def render_thumbnail_grid(
                 result = results_by_id.get(preview.file_id)
 
                 if result and result.success:
-                    thumb = result.webp_preview or result.original_preview
+                    thumb = result.preview_data or result.original_preview
                 elif preview.unsupported_error:
                     thumb = None
                 else:
@@ -1297,15 +1464,7 @@ def render_thumbnail_grid(
                             ):
                                 show_compare_dialog(result)
                         with a1:
-                            st.download_button(
-                                "↓",
-                                data=result.webp_data,
-                                file_name=basename_from_relative(result.webp_name),
-                                mime="image/webp",
-                                key=f"dl_{preview.file_id}_{page}",
-                                help="Download",
-                                use_container_width=True,
-                            )
+                            render_result_downloads(result, key_prefix="dl", page=page)
                         with a2:
                             if st.button(
                                 "↻",
@@ -1345,15 +1504,7 @@ def render_list_row_actions(
             if st.button("👁", key=f"lpv_{preview.file_id}_{page}", help="Compare", use_container_width=True):
                 show_compare_dialog(result)
         with c2:
-            st.download_button(
-                "↓",
-                data=result.webp_data,
-                file_name=basename_from_relative(result.webp_name),
-                mime="image/webp",
-                key=f"ldl_{preview.file_id}_{page}",
-                help="Download",
-                use_container_width=True,
-            )
+            render_result_downloads(result, key_prefix="ldl", page=page)
         with c3:
             if st.button("↻", key=f"lrc_{preview.file_id}_{page}", help="Re-convert", use_container_width=True):
                 reconvert_file(preview.file_id, quality, resize_pct, target_kb)
@@ -1398,7 +1549,7 @@ def render_list_view(
         meta = card_meta(preview, results_by_id)
         result = results_by_id.get(preview.file_id)
         if result and result.success:
-            thumb = result.webp_preview or result.original_preview
+            thumb = result.preview_data or result.original_preview
         elif preview.unsupported_error:
             thumb = None
         else:
@@ -1776,6 +1927,9 @@ def run_conversion(
                     webp_data=b"",
                     original_preview=None,
                     webp_preview=None,
+                    avif_name=job.avif_name,
+                    avif_bytes=0,
+                    avif_data=b"",
                     success=False,
                     quality_used=job.quality,
                     error=str(exc),
@@ -1800,6 +1954,8 @@ def run_conversion(
         "quality_mode": quality_mode,
         "lossless": encode_options.lossless,
         "strip_metadata": encode_options.strip_metadata,
+        "output_format": get_output_format_key(),
+        "avif_target_webp_pct": encode_options.avif_target_webp_pct,
     }
     st.session_state.excluded_zip_ids = set()
     st.session_state.download_ready = True
@@ -1942,7 +2098,7 @@ def render_grid_block(
                         "Status": "OK" if r.success else "Failed",
                         "Path": r.relative_path,
                         "Before": format_bytes(r.original_bytes),
-                        "After": format_bytes(r.webp_bytes) if r.success else "—",
+                        "After": result_output_size_label(r) if r.success else "—",
                         "Saved": f"{r.savings_pct:.1f}%" if r.savings_pct is not None else "—",
                         "In ZIP": r.file_id not in st.session_state.excluded_zip_ids,
                     }
@@ -1962,6 +2118,8 @@ def settings_changed(quality, resize_pct, target_kb, quality_mode, encode_option
         or settings.get("quality_mode") != quality_mode
         or settings.get("lossless") != encode_options.lossless
         or settings.get("strip_metadata") != encode_options.strip_metadata
+        or settings.get("output_format") != get_output_format_key()
+        or settings.get("avif_target_webp_pct") != encode_options.avif_target_webp_pct
     )
 
 
@@ -2024,10 +2182,31 @@ with st.sidebar:
         "Resize", 10, 100, format="%d%%", key="sq_resize", on_change=clear_active_preset
     )
     st.markdown('<div class="ecam-field-label">Output</div>', unsafe_allow_html=True)
+    st.radio(
+        "Output format",
+        OUTPUT_FORMAT_CHOICES,
+        horizontal=True,
+        key="sq_output_format",
+        on_change=on_output_format_change,
+        help="WebP follows the quality slider. With WebP + AVIF, AVIF size is tuned relative to WebP.",
+    )
+    if st.session_state.sq_output_format == "AVIF only":
+        st.markdown('<div class="quality-label">AVIF ENCODED AT Q70</div>', unsafe_allow_html=True)
+    if st.session_state.sq_output_format == "WebP + AVIF":
+        st.slider(
+            "AVIF target",
+            10,
+            100,
+            value=50,
+            format="%d%% of WebP",
+            key="sq_avif_target_pct",
+            on_change=clear_active_preset,
+            help="Target AVIF file size as a percentage of the WebP output.",
+        )
     st.checkbox(
-        "Lossless WebP",
+        "Lossless output",
         key="sq_lossless",
-        help="Preserves every pixel. Ignores quality slider.",
+        help="Preserves every pixel for the selected format(s). Ignores quality slider.",
         on_change=clear_active_preset,
     )
     st.checkbox(
@@ -2078,7 +2257,7 @@ with st.sidebar:
         successful = [r for r in results if r.success]
         included = [r for r in successful if r.file_id not in st.session_state.excluded_zip_ids]
         total_original = sum(r.original_bytes for r in included)
-        total_webp = sum(r.webp_bytes for r in included)
+        total_webp = sum(zip_output_bytes(r) for r in included)
         savings = (1 - total_webp / total_original) * 100 if total_original > 0 else 0
         render_results_summary(
             converted=f"{len(successful)}/{len(results)}",
