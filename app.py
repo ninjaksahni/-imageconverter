@@ -89,11 +89,11 @@ GRID_FILTERS: dict[str, str] = {
 
 SMALL_BATCH_THRESHOLD = 8
 
-OUTPUT_FORMAT_CHOICES = ["WebP only", "AVIF only", "WebP + AVIF"]
+OUTPUT_FORMAT_CHOICES = ["WebP only", "AVIF only", "AVIF Plus"]
 OUTPUT_FORMAT_MAP = {
     "WebP only": OUTPUT_FORMAT_WEBP,
     "AVIF only": OUTPUT_FORMAT_AVIF,
-    "WebP + AVIF": OUTPUT_FORMAT_BOTH,
+    "AVIF Plus": OUTPUT_FORMAT_BOTH,
 }
 
 COMPRESSION_PRESETS: dict[str, dict] = {
@@ -152,6 +152,8 @@ def init_batch_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    if st.session_state.get("sq_output_format") == "WebP + AVIF":
+        st.session_state.sq_output_format = "AVIF Plus"
 
 
 def clear_mp4_state() -> None:
@@ -172,8 +174,30 @@ def clear_active_preset() -> None:
 
 def on_output_format_change() -> None:
     clear_active_preset()
-    if st.session_state.get("sq_output_format") == "WebP + AVIF":
+    if st.session_state.get("sq_output_format") == "AVIF Plus":
         st.session_state.sq_avif_target_pct = 50
+
+
+def render_avif_format_hint(output_format: str) -> None:
+    if output_format == "AVIF only":
+        st.markdown(
+            '<div class="mp4-auto-summary">'
+            "<strong>Shopify:</strong> AVIF is a strong choice for product images — smaller files "
+            "help pages load faster while looking sharp on modern browsers. Upload AVIF to Shopify "
+            "or use it as your master export; Shopify will still optimize delivery per visitor."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return
+    if output_format == "AVIF Plus":
+        st.markdown(
+            '<div class="mp4-auto-summary">'
+            "<strong>Shopify:</strong> You get WebP for broad compatibility plus AVIF for faster loads "
+            "on supported browsers. Set AVIF target to <strong>50% of WebP</strong> as a balanced default. "
+            "Use <strong>40%</strong> for maximum speed, or <strong>60%</strong> if you want extra quality."
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def apply_compression_preset(name: str) -> None:
@@ -2188,11 +2212,12 @@ with st.sidebar:
         horizontal=True,
         key="sq_output_format",
         on_change=on_output_format_change,
-        help="WebP follows the quality slider. With WebP + AVIF, AVIF size is tuned relative to WebP.",
+        help="WebP follows the quality slider. AVIF Plus tunes AVIF size relative to WebP.",
     )
     if st.session_state.sq_output_format == "AVIF only":
         st.markdown('<div class="quality-label">AVIF ENCODED AT Q70</div>', unsafe_allow_html=True)
-    if st.session_state.sq_output_format == "WebP + AVIF":
+        render_avif_format_hint("AVIF only")
+    if st.session_state.sq_output_format == "AVIF Plus":
         st.slider(
             "AVIF target",
             10,
@@ -2202,6 +2227,7 @@ with st.sidebar:
             on_change=clear_active_preset,
             help="Target AVIF file size as a percentage of the WebP output.",
         )
+        render_avif_format_hint("AVIF Plus")
     st.checkbox(
         "Lossless output",
         key="sq_lossless",
