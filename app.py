@@ -753,11 +753,12 @@ def _compare_view_height(images: list[bytes]) -> int:
     panel_count = max(len(images), 1)
     column_width = _compare_column_width(panel_count)
     heights = [_compare_loupe_height(image, column_width=column_width) for image in images]
-    return max(heights, default=320) + 72
+    return max(heights, default=320) + 108
 
 
-def _compare_panel_html(*, title: str, data: bytes, label: str, side: str) -> str:
+def _compare_panel_html(*, title: str, data: bytes, side: str) -> str:
     uri = _image_data_uri(data)
+    size_label = format_bytes(len(data))
     return f"""
                 <div class="compare-panel">
                     <div class="compare-panel-title">{html.escape(title)}</div>
@@ -766,18 +767,18 @@ def _compare_panel_html(*, title: str, data: bytes, label: str, side: str) -> st
                         <div class="compare-loupe-glass"></div>
                         <div class="compare-mag-badge"></div>
                     </div>
-                    <div class="compare-panel-label">{html.escape(label)}</div>
+                    <div class="compare-panel-size">{html.escape(size_label)}</div>
                 </div>"""
 
 
 def render_sync_compare_view(
-    panels: list[tuple[str, bytes, str, str]],
+    panels: list[tuple[str, bytes, str]],
     *,
     element_id: str,
 ) -> None:
     """Render synced loupe compare for one or more output panels.
 
-    Each panel is ``(title, image_bytes, size_label, side_id)``.
+    Each panel is ``(title, image_bytes, side_id)``.
     """
     if not panels:
         return
@@ -785,10 +786,10 @@ def render_sync_compare_view(
     safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", element_id)
     panel_count = len(panels)
     panels_html = "".join(
-        _compare_panel_html(title=title, data=data, label=label, side=side)
-        for title, data, label, side in panels
+        _compare_panel_html(title=title, data=data, side=side)
+        for title, data, side in panels
     )
-    image_bytes = [data for _, data, _, _ in panels]
+    image_bytes = [data for _, data, _ in panels]
     height = _compare_view_height(image_bytes)
     components.html(
         f"""
@@ -831,9 +832,9 @@ def render_sync_compare_view(
             border: 1px solid #00c853; border-radius: 2px; padding: 0.12rem 0.35rem;
             white-space: nowrap;
         }}
-        .compare-panel-label {{
-            font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em;
-            color: #8b939e; margin-top: 0.35rem;
+        .compare-panel-size {{
+            font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
+            color: #00c853; margin-top: 0.4rem; text-align: center;
         }}
         </style>
         <div class="compare-sync-root" id="root-{safe_id}">
@@ -1343,19 +1344,13 @@ def show_compare_dialog(result: ConversionResult) -> None:
     savings = f"{result.savings_pct:.1f}%" if result.savings_pct is not None else "—"
     mode = result_quality_label(result)
     original_bytes = _compare_original_bytes(result)
-    compare_panels: list[tuple[str, bytes, str, str]] = []
+    compare_panels: list[tuple[str, bytes, str]] = []
     if original_bytes:
-        compare_panels.append(
-            ("Original", original_bytes, format_bytes(result.original_bytes), "orig")
-        )
+        compare_panels.append(("Original", original_bytes, "orig"))
     if result.webp_data:
-        compare_panels.append(
-            ("WebP output", result.webp_data, format_bytes(result.webp_bytes), "webp")
-        )
+        compare_panels.append(("WebP output", result.webp_data, "webp"))
     if result.avif_data:
-        compare_panels.append(
-            ("AVIF output", result.avif_data, format_bytes(result.avif_bytes), "avif")
-        )
+        compare_panels.append(("AVIF output", result.avif_data, "avif"))
     if compare_panels:
         render_sync_compare_view(compare_panels, element_id=f"cmp-{result.file_id}")
     output_summary = result_output_size_label(result)
