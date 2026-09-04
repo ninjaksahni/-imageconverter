@@ -148,11 +148,17 @@ def partition_uploads(
     return supported, unsupported
 
 
-def webp_name_for_relative(relative_path: str, used_names: set[str]) -> str:
+def webp_name_for_relative(
+    relative_path: str,
+    used_names: set[str],
+    width: int,
+    height: int,
+) -> str:
     path = PurePosixPath(relative_path.replace("\\", "/"))
     parent = str(path.parent) if path.parent != PurePosixPath(".") else ""
     stem = path.stem
-    base = f"{stem}_webp.webp"
+    dim = f"{width}x{height}"
+    base = f"{stem}_webp_{dim}.webp"
     candidate = f"{parent}/{base}" if parent else base
 
     if candidate not in used_names:
@@ -161,7 +167,7 @@ def webp_name_for_relative(relative_path: str, used_names: set[str]) -> str:
 
     counter = 1
     while True:
-        alt = f"{stem}_webp_{counter}.webp"
+        alt = f"{stem}_webp_{dim}_{counter}.webp"
         candidate = f"{parent}/{alt}" if parent else alt
         if candidate not in used_names:
             used_names.add(candidate)
@@ -169,11 +175,17 @@ def webp_name_for_relative(relative_path: str, used_names: set[str]) -> str:
         counter += 1
 
 
-def avif_name_for_relative(relative_path: str, used_names: set[str]) -> str:
+def avif_name_for_relative(
+    relative_path: str,
+    used_names: set[str],
+    width: int,
+    height: int,
+) -> str:
     path = PurePosixPath(relative_path.replace("\\", "/"))
     parent = str(path.parent) if path.parent != PurePosixPath(".") else ""
     stem = path.stem
-    base = f"{stem}_avif.avif"
+    dim = f"{width}x{height}"
+    base = f"{stem}_avif_{dim}.avif"
     candidate = f"{parent}/{base}" if parent else base
 
     if candidate not in used_names:
@@ -182,7 +194,7 @@ def avif_name_for_relative(relative_path: str, used_names: set[str]) -> str:
 
     counter = 1
     while True:
-        alt = f"{stem}_avif_{counter}.avif"
+        alt = f"{stem}_avif_{dim}_{counter}.avif"
         candidate = f"{parent}/{alt}" if parent else alt
         if candidate not in used_names:
             used_names.add(candidate)
@@ -581,11 +593,11 @@ def convert_image(
     rel = rel.replace("\\", "/")
     basename = PurePosixPath(rel).name
     opts = encode_options or EncodeOptions()
-    output_webp_name = webp_name or (webp_name_for_relative(rel, used) if opts.output_webp else "")
-    output_avif_name = avif_name or (avif_name_for_relative(rel, used) if opts.output_avif else "")
     original_bytes = len(file_bytes)
     original_preview = make_thumbnail(file_bytes)
     effective_quality = 100 if opts.lossless else quality
+    output_webp_name = webp_name or ""
+    output_avif_name = avif_name or ""
 
     try:
         prepared = prepare_image_from_bytes(
@@ -593,6 +605,11 @@ def convert_image(
             resize_pct=resize_pct,
             edit_params=edit_params,
         )
+        out_width, out_height = prepared.size
+        if opts.output_webp and not output_webp_name:
+            output_webp_name = webp_name_for_relative(rel, used, out_width, out_height)
+        if opts.output_avif and not output_avif_name:
+            output_avif_name = avif_name_for_relative(rel, used, out_width, out_height)
 
         webp_data = b""
         avif_data = b""
@@ -689,13 +706,23 @@ def build_convert_jobs(
             resize_pct=resize_pct,
             edit_params=edit_params,
         )
+        prepared = prepare_image_from_bytes(
+            data,
+            resize_pct=resize_pct,
+            edit_params=edit_params,
+        )
+        out_width, out_height = prepared.size
         jobs.append(
             ConvertJob(
                 file_id=file_id,
                 relative_path=rel,
                 data=data,
-                webp_name=webp_name_for_relative(rel, used_names) if opts.output_webp else "",
-                avif_name=avif_name_for_relative(rel, used_names) if opts.output_avif else "",
+                webp_name=webp_name_for_relative(rel, used_names, out_width, out_height)
+                if opts.output_webp
+                else "",
+                avif_name=avif_name_for_relative(rel, used_names, out_width, out_height)
+                if opts.output_avif
+                else "",
                 quality=effective_quality,
                 encode_options=opts,
                 edit_params=edit_params,
