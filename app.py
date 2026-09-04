@@ -258,6 +258,228 @@ def get_encode_options() -> EncodeOptions:
     )
 
 
+def get_convert_settings() -> tuple[int, int, int | None, str]:
+    quality_mode = st.session_state.get("sq_mode", "Fixed quality")
+    quality = int(st.session_state.get("sq_quality", DEFAULT_QUALITY))
+    resize_pct = int(st.session_state.get("sq_resize", 100))
+    target_kb: int | None = None
+    if quality_mode == "Target max file size":
+        target_kb = int(st.session_state.get("sq_target_kb", 200))
+    return quality, resize_pct, target_kb, quality_mode
+
+
+def build_edit_params_from_dialog(
+    *,
+    crop_data: dict | None,
+    preview_scale: float,
+    image_width: int,
+    image_height: int,
+    aspect_choice: str,
+    max_width: int,
+    max_height: int,
+) -> ImageEditParams:
+    crop_box = crop_data_to_box(crop_data, preview_scale=preview_scale)
+    if crop_box is None:
+        crop_box = (0, 0, image_width, image_height)
+    return ImageEditParams(
+        crop_box=crop_box,
+        max_width=normalize_max_dimension(max_width),
+        max_height=normalize_max_dimension(max_height),
+        aspect_ratio=ASPECT_RATIO_MAP.get(aspect_choice),
+        aspect_label=aspect_choice,
+        is_active=True,
+    )
+
+
+def convert_file_with_edit_params(
+    file_id: str,
+    edit_params: ImageEditParams,
+    *,
+    quality: int,
+    resize_pct: int,
+    target_kb: int | None,
+) -> ConversionResult:
+    info = st.session_state.batch_files.get(file_id)
+    if not info:
+        return ConversionResult(
+            file_id=file_id,
+            original_name="",
+            relative_path="",
+            webp_name="",
+            original_bytes=0,
+            webp_bytes=0,
+            webp_data=b"",
+            original_preview=None,
+            webp_preview=None,
+            success=False,
+            error="File not found.",
+        )
+    data = read_bytes(info)
+    encode_options = get_encode_options()
+    target_bytes = target_kb * 1024 if target_kb else None
+    effective_quality = resolve_encode_quality(
+        quality,
+        encode_options=encode_options,
+        target_bytes=target_bytes,
+        file_bytes=data,
+        resize_pct=resize_pct,
+        edit_params=edit_params,
+    )
+    used: set[str] = set()
+    for existing in st.session_state.results_by_id.values():
+        if existing.file_id != file_id:
+            if existing.webp_name:
+                used.add(existing.webp_name)
+            if existing.avif_name:
+                used.add(existing.avif_name)
+    return convert_image(
+        data,
+        info["relative_path"],
+        file_id=file_id,
+        relative_path=info["relative_path"],
+        quality=effective_quality,
+        resize_pct=resize_pct,
+        used_names=used,
+        encode_options=encode_options,
+        edit_params=edit_params,
+    )
+
+
+def store_edit_conversion_result(
+    file_id: str,
+    edit_params: ImageEditParams,
+    result: ConversionResult,
+    *,
+    quality: int,
+    resize_pct: int,
+    target_kb: int | None,
+    quality_mode: str,
+) -> None:
+    encode_options = get_encode_options()
+    st.session_state.file_edits[file_id] = edit_params
+    st.session_state.results_by_id[file_id] = result
+    st.session_state["results"] = get_ordered_results()
+    st.session_state["settings"] = {
+        "quality": quality,
+        "resize_pct": resize_pct,
+        "target_kb": target_kb,
+        "quality_mode": quality_mode,
+        "lossless": encode_options.lossless,
+        "strip_metadata": encode_options.strip_metadata,
+        "output_format": get_output_format_key(),
+        "avif_target_webp_pct": encode_options.avif_target_webp_pct,
+    }
+    if result.success:
+        st.session_state.download_ready = True
+
+
+def single_result_download_payload(result: ConversionResult) -> tuple[bytes, str, str]:
+    if not result.success:
+        return b"", "output.bin", "application/octet-stream"
+    if result.webp_data and result.avif_data:
+        stem = PurePosixPath(result.relative_path).stem
+        return (
+            build_zip([result], excluded_ids=set()),
+            f"{stem}_outputs.zip",
+            "application/zip",
+        )
+    if result.avif_data:
+        return (
+            result.avif_data,
+            basename_from_relative(result.avif_name),
+            "image/avif",
+        )
+    return (
+        result.webp_data,
+        basename_from_relative(result.webp_name),
+        "image/webp",
+    )
+
+
+@st.cache_data(show_spinner=False)
+def cached_edit_convert_download(
+    file_digest: str,
+    edit_key: tuple,
+    settings_key: tuple,
+    file_bytes: bytes,
+    relative_path: str,
+    file_id: str,
+) -> tuple[bytes, str, str, bool, str | None]:
+    (
+        quality,
+        resize_pct,
+        target_kb,
+        _quality_mode,
+        lossless,
+        strip_metadata,
+        output_webp,
+        output_avif,
+        avif_target_pct,
+    ) = settings_key
+    encode_options = EncodeOptions(
+        lossless=lossless,
+        strip_metadata=strip_metadata,
+        output_webp=output_webp,
+        output_avif=output_avif,
+        avif_target_webp_pct=avif_target_pct,
+    )
+    edit_params = ImageEditParams(
+        crop_box=edit_key[0],
+        max_width=edit_key[1],
+        max_height=edit_key[2],
+        aspect_ratio=edit_key[3],
+        aspect_label=edit_key[4],
+        is_active=edit_key[5],
+    )
+    target_bytes = target_kb * 1024 if target_kb else None
+    effective_quality = resolve_encode_quality(
+        quality,
+        encode_options=encode_options,
+        target_bytes=target_bytes,
+        file_bytes=file_bytes,
+        resize_pct=resize_pct,
+        edit_params=edit_params,
+    )
+    result = convert_image(
+        file_bytes,
+        relative_path,
+        file_id=file_id,
+        relative_path=relative_path,
+        quality=effective_quality,
+        resize_pct=resize_pct,
+        encode_options=encode_options,
+        edit_params=edit_params,
+    )
+    payload = single_result_download_payload(result)
+    return (*payload, result.success, result.error)
+
+
+def on_edit_convert_download(
+    file_id: str,
+    params: ImageEditParams,
+    quality: int,
+    resize_pct: int,
+    target_kb: int | None,
+    quality_mode: str,
+) -> None:
+    result = convert_file_with_edit_params(
+        file_id,
+        params,
+        quality=quality,
+        resize_pct=resize_pct,
+        target_kb=target_kb,
+    )
+    store_edit_conversion_result(
+        file_id,
+        params,
+        result,
+        quality=quality,
+        resize_pct=resize_pct,
+        target_kb=target_kb,
+        quality_mode=quality_mode,
+    )
+
+
 def result_quality_label(result: ConversionResult) -> str:
     if result.quality_used >= 100 and (not result.avif_bytes or result.avif_quality_used >= 100):
         return "Lossless"
@@ -1579,20 +1801,37 @@ def show_edit_dialog(file_id: str) -> None:
             key=f"edit_cropper_{file_id}",
         )
 
-    draft_crop = crop_data_to_box(crop_data, preview_scale=preview_scale) or (
-        existing.crop_box if existing else None
+    draft_params = build_edit_params_from_dialog(
+        crop_data=crop_data,
+        preview_scale=preview_scale,
+        image_width=image_width,
+        image_height=image_height,
+        aspect_choice=aspect_choice,
+        max_width=max_width,
+        max_height=max_height,
     )
-    draft_max_w = normalize_max_dimension(max_width)
-    draft_max_h = normalize_max_dimension(max_height)
-    draft_params = ImageEditParams(
-        crop_box=draft_crop,
-        max_width=draft_max_w,
-        max_height=draft_max_h,
-        aspect_ratio=ASPECT_RATIO_MAP.get(aspect_choice),
-        aspect_label=aspect_choice,
-        is_active=True,
+    quality, resize_pct, target_kb, quality_mode = get_convert_settings()
+    encode_options = get_encode_options()
+    dl_data, dl_name, dl_mime, dl_ok, dl_error = cached_edit_convert_download(
+        make_file_id(file_bytes),
+        draft_params.cache_key(),
+        (
+            quality,
+            resize_pct,
+            target_kb,
+            quality_mode,
+            encode_options.lossless,
+            encode_options.strip_metadata,
+            encode_options.output_webp,
+            encode_options.output_avif,
+            encode_options.avif_target_webp_pct,
+        ),
+        file_bytes,
+        info["relative_path"],
+        file_id,
     )
     out_w, out_h = preview_dimensions(file_bytes, draft_params)
+    draft_crop = draft_params.crop_box
     crop_w = (draft_crop[2] - draft_crop[0]) if draft_crop else image_width
     crop_h = (draft_crop[3] - draft_crop[1]) if draft_crop else image_height
     st.markdown(
@@ -1602,7 +1841,7 @@ def show_edit_dialog(file_id: str) -> None:
         unsafe_allow_html=True,
     )
 
-    cancel_col, reset_col, apply_col = st.columns(3)
+    cancel_col, reset_col, apply_col, convert_col = st.columns(4)
     with cancel_col:
         if st.button("CANCEL", key=f"edit_cancel_{file_id}", use_container_width=True):
             st.session_state.edit_dialog_file_id = None
@@ -1613,17 +1852,15 @@ def show_edit_dialog(file_id: str) -> None:
             st.session_state.edit_dialog_file_id = None
             st.rerun()
     with apply_col:
-        if st.button("APPLY", type="primary", key=f"edit_apply_{file_id}", use_container_width=True):
-            crop_box = crop_data_to_box(crop_data, preview_scale=preview_scale)
-            if crop_box is None:
-                crop_box = (0, 0, image_width, image_height)
-            params = ImageEditParams(
-                crop_box=crop_box,
-                max_width=draft_max_w,
-                max_height=draft_max_h,
-                aspect_ratio=ASPECT_RATIO_MAP.get(aspect_choice),
-                aspect_label=aspect_choice,
-                is_active=True,
+        if st.button("APPLY", type="secondary", key=f"edit_apply_{file_id}", use_container_width=True):
+            params = build_edit_params_from_dialog(
+                crop_data=crop_data,
+                preview_scale=preview_scale,
+                image_width=image_width,
+                image_height=image_height,
+                aspect_choice=aspect_choice,
+                max_width=max_width,
+                max_height=max_height,
             )
             st.session_state.file_edits[file_id] = params
             st.session_state.results_by_id.pop(file_id, None)
@@ -1631,6 +1868,34 @@ def show_edit_dialog(file_id: str) -> None:
             st.session_state.download_ready = False
             st.session_state.edit_dialog_file_id = None
             st.rerun()
+    with convert_col:
+        if dl_ok and dl_data:
+            st.download_button(
+                "CONVERT & DOWNLOAD",
+                data=dl_data,
+                file_name=dl_name,
+                mime=dl_mime,
+                type="primary",
+                key=f"edit_convert_dl_{file_id}",
+                use_container_width=True,
+                help="Apply edits, convert with current sidebar settings, and download",
+                on_click=on_edit_convert_download,
+                args=(file_id, draft_params, quality, resize_pct, target_kb, quality_mode),
+            )
+        else:
+            st.button(
+                "CONVERT & DOWNLOAD",
+                type="primary",
+                disabled=True,
+                key=f"edit_convert_dl_disabled_{file_id}",
+                use_container_width=True,
+                help=dl_error or "Conversion preview unavailable",
+            )
+    if not dl_ok and dl_error:
+        st.markdown(
+            f'<div class="advisory advisory-fail">{html.escape(dl_error)}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 @st.dialog("Compare", width="large")
