@@ -140,10 +140,19 @@ def preview_dimensions(
     return image.size
 
 
-def oriented_preview_bytes(file_bytes: bytes) -> bytes:
-    with load_oriented_image(file_bytes) as image:
-        buffer = io.BytesIO()
-        if image.mode not in ("RGB", "RGBA"):
-            image = image.convert("RGBA" if "A" in image.mode else "RGB")
-        image.save(buffer, format="PNG")
-        return buffer.getvalue()
+def oriented_preview_bytes(file_bytes: bytes, *, max_edge: int = 1600) -> tuple[bytes, float]:
+    image = load_oriented_image(file_bytes)
+    if image.mode not in ("RGB", "RGBA"):
+        image = image.convert("RGBA" if "A" in image.mode else "RGB")
+    width, height = image.size
+    scale = 1.0
+    longest = max(width, height)
+    if longest > max_edge:
+        scale = max_edge / longest
+        image = image.resize(
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue(), scale

@@ -1,4 +1,4 @@
-"""Bidirectional image cropper Streamlit component (Cropper.js)."""
+"""Bidirectional image cropper Streamlit component (Cropper.js, self-hosted)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 
 _PARENT_DIR = os.path.dirname(os.path.abspath(__file__))
 _component = components.declare_component(
-    "image_cropper",
+    "image_cropper_widget",
     path=os.path.join(_PARENT_DIR, "frontend"),
 )
 
@@ -19,6 +19,7 @@ def image_cropper(
     aspect_ratio: float | None = None,
     initial_crop: dict | None = None,
     key: str | None = None,
+    height: int = 460,
 ) -> dict | None:
     """Render interactive crop UI.
 
@@ -31,4 +32,5 @@ def image_cropper(
         initialCrop=initial_crop or {},
         key=key,
         default=None,
+        height=height,
     )

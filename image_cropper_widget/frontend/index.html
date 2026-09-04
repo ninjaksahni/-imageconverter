@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
+  <link rel="stylesheet" href="./cropper.min.css" />
   <style>
     html, body {
       margin: 0;
@@ -11,13 +11,11 @@
       background: #0a0c0f;
       font-family: 'IBM Plex Mono', monospace;
       color: #8b939e;
-      overflow: hidden;
     }
-    .cropper-root {
-      padding: 0.25rem 0;
-    }
+    .cropper-root { padding: 0.25rem 0; }
     .cropper-wrap {
-      max-height: 55vh;
+      max-height: 52vh;
+      min-height: 220px;
       overflow: hidden;
       background: #12151a;
       border: 1px solid #3d4450;
@@ -34,27 +32,42 @@
       margin-top: 0.35rem;
       color: #8b939e;
     }
-    .cropperjs-container .cropper-view-box,
-    .cropperjs-container .cropper-face {
-      border-radius: 0;
+    .cropper-error {
+      color: #ff3d3d;
+      font-size: 0.68rem;
+      margin-top: 0.35rem;
     }
   </style>
 </head>
 <body>
   <div class="cropper-root">
     <div class="cropper-wrap">
-      <img id="source" alt="" />
+      <img id="source" alt="Crop preview" />
     </div>
     <div class="cropper-hint" id="hint">Drag handles to crop</div>
+    <div class="cropper-error" id="error" hidden></div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
-  <script src="https://unpkg.com/streamlit-component-lib@2.0.0/dist/streamlit-component-lib.js"></script>
+  <script src="./cropper.min.js"></script>
   <script>
     const img = document.getElementById("source");
     const hint = document.getElementById("hint");
+    const errorEl = document.getElementById("error");
     let cropper = null;
     let suppressEvents = false;
+    let lastImageData = "";
+
+    function sendToStreamlit(type, data) {
+      window.parent.postMessage(
+        Object.assign({ isStreamlitMessage: true, type: type }, data),
+        "*"
+      );
+    }
+
+    function setError(message) {
+      errorEl.hidden = !message;
+      errorEl.textContent = message || "";
+    }
 
     function toNumber(value) {
       const n = Number(value);
@@ -73,8 +86,11 @@
     function sendCrop() {
       if (!cropper || suppressEvents) return;
       const data = roundCrop(cropper.getData(true));
-      hint.textContent = `Crop: ${data.width}×${data.height} at (${data.x}, ${data.y})`;
-      Streamlit.setComponentValue(data);
+      hint.textContent = "Crop: " + data.width + "×" + data.height + " at (" + data.x + ", " + data.y + ")";
+      sendToStreamlit("streamlit:setComponentValue", {
+        value: data,
+        dataType: "json",
+      });
     }
 
     function destroyCropper() {
@@ -88,6 +104,7 @@
       const n = toNumber(value);
       return Number.isFinite(n) && n > 0 ? n : NaN;
     }
+
     function applyInitialCrop(initialCrop) {
       if (!cropper || !initialCrop) return;
       const width = toNumber(initialCrop.width);
@@ -99,8 +116,8 @@
       cropper.setData({
         x: toNumber(initialCrop.x) || 0,
         y: toNumber(initialCrop.y) || 0,
-        width,
-        height,
+        width: width,
+        height: height,
       });
       suppressEvents = false;
       sendCrop();
@@ -111,35 +128,63 @@
       const aspectRatio = buildAspectRatio(args.aspectRatio);
       const initialCrop = args.initialCrop || {};
 
-      destroyCropper();
-      img.onload = () => {
-        cropper = new Cropper(img, {
-          viewMode: 1,
-          dragMode: "move",
-          autoCropArea: 1,
-          responsive: true,
-          background: false,
-          aspectRatio,
-          crop() {
-            sendCrop();
-          },
-        });
+      if (!imageData) {
+        setError("No image data received.");
+        return;
+      }
+      setError("");
+
+      if (imageData === lastImageData && cropper) {
+        cropper.setAspectRatio(aspectRatio);
         applyInitialCrop(initialCrop);
-        if (!initialCrop.width) {
-          sendCrop();
+        sendToStreamlit("streamlit:setFrameHeight", { height: 460 });
+        return;
+      }
+
+      lastImageData = imageData;
+      destroyCropper();
+
+      img.onload = function () {
+        try {
+          if (typeof Cropper === "undefined") {
+            throw new Error("Cropper.js failed to load.");
+          }
+          cropper = new Cropper(img, {
+            viewMode: 1,
+            dragMode: "move",
+            autoCropArea: 1,
+            responsive: true,
+            background: false,
+            aspectRatio: aspectRatio,
+            crop: function () {
+              sendCrop();
+            },
+          });
+          applyInitialCrop(initialCrop);
+          if (!initialCrop.width) {
+            sendCrop();
+          }
+          sendToStreamlit("streamlit:setFrameHeight", { height: 460 });
+        } catch (err) {
+          setError(err && err.message ? err.message : "Could not initialize cropper.");
         }
       };
+
+      img.onerror = function () {
+        setError("Could not load image preview.");
+      };
+
       img.src = "data:image/png;base64," + imageData;
     }
 
     function onRender(event) {
-      const args = event.detail.args || {};
-      initCropper(args);
+      if (!event.data || event.data.type !== "streamlit:render") return;
+      initCropper(event.data.args || {});
     }
 
-    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
-    Streamlit.setComponentReady();
-    Streamlit.setFrameHeight(420);
+    window.addEventListener("message", onRender);
+    sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+    sendToStreamlit("streamlit:setFrameHeight", { height: 460 });
   </script>
 </body>
 </html>

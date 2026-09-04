@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 import streamlit as st
 import streamlit.components.v1 as components
 
-from components.image_cropper import image_cropper
+from image_cropper_widget import image_cropper
 from converter import (
     DEFAULT_QUALITY,
     BatchEstimate,
@@ -397,7 +397,11 @@ def aspect_ratio_for_cropper(choice: str, image_width: int, image_height: int) -
     return ratio[0] / ratio[1]
 
 
-def crop_box_to_initial_crop(crop_box: tuple[int, int, int, int] | None) -> dict | None:
+def crop_box_to_initial_crop(
+    crop_box: tuple[int, int, int, int] | None,
+    *,
+    preview_scale: float = 1.0,
+) -> dict | None:
     if not crop_box:
         return None
     left, top, right, bottom = crop_box
@@ -405,10 +409,20 @@ def crop_box_to_initial_crop(crop_box: tuple[int, int, int, int] | None) -> dict
     height = bottom - top
     if width <= 0 or height <= 0:
         return None
-    return {"x": left, "y": top, "width": width, "height": height}
+    scale = preview_scale if preview_scale > 0 else 1.0
+    return {
+        "x": int(round(left * scale)),
+        "y": int(round(top * scale)),
+        "width": max(1, int(round(width * scale))),
+        "height": max(1, int(round(height * scale))),
+    }
 
 
-def crop_data_to_box(crop_data: dict | None) -> tuple[int, int, int, int] | None:
+def crop_data_to_box(
+    crop_data: dict | None,
+    *,
+    preview_scale: float = 1.0,
+) -> tuple[int, int, int, int] | None:
     if not crop_data:
         return None
     try:
@@ -420,6 +434,13 @@ def crop_data_to_box(crop_data: dict | None) -> tuple[int, int, int, int] | None
         return None
     if width <= 0 or height <= 0:
         return None
+    scale = preview_scale if preview_scale > 0 else 1.0
+    if scale != 1.0:
+        inv = 1.0 / scale
+        x = int(round(x * inv))
+        y = int(round(y * inv))
+        width = max(1, int(round(width * inv)))
+        height = max(1, int(round(height * inv)))
     return (x, y, x + width, y + height)
 
 
@@ -1495,7 +1516,7 @@ def show_edit_dialog(file_id: str) -> None:
     existing = get_file_edit(file_id)
     oriented = load_oriented_image(file_bytes)
     image_width, image_height = oriented.size
-    preview_png = oriented_preview_bytes(file_bytes)
+    preview_png, preview_scale = oriented_preview_bytes(file_bytes)
     preview_b64 = base64.b64encode(preview_png).decode("ascii")
 
     st.markdown(
@@ -1551,11 +1572,16 @@ def show_edit_dialog(file_id: str) -> None:
         crop_data = image_cropper(
             preview_b64,
             aspect_ratio=aspect_ratio_for_cropper(aspect_choice, image_width, image_height),
-            initial_crop=crop_box_to_initial_crop(existing.crop_box if existing else None),
+            initial_crop=crop_box_to_initial_crop(
+                existing.crop_box if existing else None,
+                preview_scale=preview_scale,
+            ),
             key=f"edit_cropper_{file_id}",
         )
 
-    draft_crop = crop_data_to_box(crop_data) or (existing.crop_box if existing else None)
+    draft_crop = crop_data_to_box(crop_data, preview_scale=preview_scale) or (
+        existing.crop_box if existing else None
+    )
     draft_max_w = normalize_max_dimension(max_width)
     draft_max_h = normalize_max_dimension(max_height)
     draft_params = ImageEditParams(
@@ -1588,7 +1614,7 @@ def show_edit_dialog(file_id: str) -> None:
             st.rerun()
     with apply_col:
         if st.button("APPLY", type="primary", key=f"edit_apply_{file_id}", use_container_width=True):
-            crop_box = crop_data_to_box(crop_data)
+            crop_box = crop_data_to_box(crop_data, preview_scale=preview_scale)
             if crop_box is None:
                 crop_box = (0, 0, image_width, image_height)
             params = ImageEditParams(
