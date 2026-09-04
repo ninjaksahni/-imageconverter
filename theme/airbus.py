@@ -948,6 +948,25 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
 }}
 .compare-stats strong {{ color: {GREEN}; }}
 
+/* Image edit dialog */
+.edit-dialog-path {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; font-weight: 600;
+    color: {WHITE}; margin-bottom: 0.25rem;
+}}
+.edit-dialog-dims {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; color: {TEXT_MUTED};
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.65rem;
+}}
+.edit-dialog-preview {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; color: {TEXT_MUTED};
+    margin: 0.55rem 0 0.75rem; padding: 0.45rem 0.55rem;
+    border-left: 2px solid {CYAN}; background: rgba(0, 212, 255, 0.06);
+}}
+.edit-dialog-preview strong {{ color: {CYAN}; }}
+.edit-dialog-crop-anchor + iframe {{
+    border: 1px solid {BORDER}; border-radius: 2px; background: {BG_DEEP};
+}}
+
 /* MP4 compress dialog */
 .mp4-probe-grid {{
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.45rem;

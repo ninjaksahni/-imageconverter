@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 import streamlit as st
 import streamlit.components.v1 as components
 
+from components.image_cropper import image_cropper
 from converter import (
     DEFAULT_QUALITY,
     BatchEstimate,
@@ -36,6 +37,14 @@ from converter import (
     make_thumbnail,
     resolve_encode_quality,
     validate_image,
+)
+from image_editor import (
+    ImageEditParams,
+    has_active_edits,
+    load_oriented_image,
+    normalize_max_dimension,
+    oriented_preview_bytes,
+    preview_dimensions,
 )
 from storage import (
     basename_from_relative,
@@ -103,6 +112,16 @@ COMPRESSION_PRESETS: dict[str, dict] = {
     "Thumbnail": {"mode": "Fixed quality", "quality": 75, "resize": 50, "target_kb": 200},
 }
 
+ASPECT_RATIO_CHOICES = ["Free", "Original", "1:1", "4:3", "3:2", "16:9"]
+ASPECT_RATIO_MAP: dict[str, tuple[int, int] | None] = {
+    "Free": None,
+    "Original": None,
+    "1:1": (1, 1),
+    "4:3": (4, 3),
+    "3:2": (3, 2),
+    "16:9": (16, 9),
+}
+
 
 @dataclass
 class PreviewFile:
@@ -148,6 +167,8 @@ def init_batch_state() -> None:
         "mp4_dialog_open": False,
         "mp4_uploader_key": 0,
         "mp4_show_compare": False,
+        "file_edits": {},
+        "edit_dialog_file_id": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -346,9 +367,72 @@ def remove_batch_file(file_id: str) -> None:
     remove_stored_file(file_id)
     st.session_state.results_by_id.pop(file_id, None)
     st.session_state.excluded_zip_ids.discard(file_id)
+    st.session_state.file_edits.pop(file_id, None)
     st.session_state.pop("results", None)
     st.session_state.pop("settings", None)
     st.session_state.download_ready = False
+
+
+def clear_file_edit(file_id: str) -> None:
+    st.session_state.file_edits.pop(file_id, None)
+    st.session_state.results_by_id.pop(file_id, None)
+    st.session_state.pop("results", None)
+    st.session_state.download_ready = False
+
+
+def get_file_edit(file_id: str) -> ImageEditParams | None:
+    return st.session_state.file_edits.get(file_id)
+
+
+def aspect_ratio_for_cropper(choice: str, image_width: int, image_height: int) -> float | None:
+    if choice == "Free":
+        return None
+    if choice == "Original":
+        if image_width <= 0 or image_height <= 0:
+            return None
+        return image_width / image_height
+    ratio = ASPECT_RATIO_MAP.get(choice)
+    if not ratio:
+        return None
+    return ratio[0] / ratio[1]
+
+
+def crop_box_to_initial_crop(crop_box: tuple[int, int, int, int] | None) -> dict | None:
+    if not crop_box:
+        return None
+    left, top, right, bottom = crop_box
+    width = right - left
+    height = bottom - top
+    if width <= 0 or height <= 0:
+        return None
+    return {"x": left, "y": top, "width": width, "height": height}
+
+
+def crop_data_to_box(crop_data: dict | None) -> tuple[int, int, int, int] | None:
+    if not crop_data:
+        return None
+    try:
+        x = int(crop_data["x"])
+        y = int(crop_data["y"])
+        width = int(crop_data["width"])
+        height = int(crop_data["height"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return (x, y, x + width, y + height)
+
+
+def aspect_choice_from_params(params: ImageEditParams | None) -> str:
+    if not params:
+        return "Free"
+    if params.aspect_label and params.aspect_label in ASPECT_RATIO_CHOICES:
+        return params.aspect_label
+    if params.aspect_ratio:
+        for label, ratio in ASPECT_RATIO_MAP.items():
+            if ratio == params.aspect_ratio:
+                return label
+    return "Free"
 
 
 def clear_all_files() -> None:
@@ -357,6 +441,7 @@ def clear_all_files() -> None:
     st.session_state.uploader_key += 1
     st.session_state.results_by_id = {}
     st.session_state.excluded_zip_ids = set()
+    st.session_state.file_edits = {}
     st.session_state.grid_page = 0
     st.session_state.grid_filter = "all"
     st.session_state.pop("results", None)
@@ -475,6 +560,7 @@ def reconvert_file(file_id: str, quality: int, resize_pct: int, target_kb: int |
     if not info:
         return
     data = read_bytes(info)
+    edit_params = get_file_edit(file_id)
     target_bytes = target_kb * 1024 if target_kb else None
     encode_options = get_encode_options()
     effective_quality = resolve_encode_quality(
@@ -483,6 +569,7 @@ def reconvert_file(file_id: str, quality: int, resize_pct: int, target_kb: int |
         target_bytes=target_bytes,
         file_bytes=data,
         resize_pct=resize_pct,
+        edit_params=edit_params,
     )
     used: set[str] = set()
     for existing in st.session_state.results_by_id.values():
@@ -500,6 +587,7 @@ def reconvert_file(file_id: str, quality: int, resize_pct: int, target_kb: int |
         resize_pct=resize_pct,
         used_names=used,
         encode_options=get_encode_options(),
+        edit_params=edit_params,
     )
     st.session_state.results_by_id[file_id] = result
     st.session_state["results"] = get_ordered_results()
@@ -542,6 +630,8 @@ def card_badge(
     results_by_id: dict[str, ConversionResult],
     live_status: dict[str, str] | None = None,
 ) -> tuple[str, str]:
+    if has_active_edits(get_file_edit(preview.file_id)):
+        return "Edited", "badge-warn"
     if preview.unsupported_error:
         return "Unsupported", "badge-warn"
     if preview.file_id in results_by_id:
@@ -579,7 +669,17 @@ def cached_batch_estimate(
     settings_key: tuple,
     file_data: tuple[tuple[str, bytes], ...],
 ) -> tuple[tuple[str, int, int, float], ...]:
-    _, quality, resize_pct, target_kb, lossless, strip_metadata, output_webp, output_avif = settings_key
+    (
+        _file_ids,
+        quality,
+        resize_pct,
+        target_kb,
+        lossless,
+        strip_metadata,
+        output_webp,
+        output_avif,
+        edit_keys,
+    ) = settings_key
     target_bytes = target_kb * 1024 if target_kb else None
     encode_options = EncodeOptions(
         lossless=lossless,
@@ -587,12 +687,28 @@ def cached_batch_estimate(
         output_webp=output_webp,
         output_avif=output_avif,
     )
+    edits = []
+    for edit_key in edit_keys:
+        if not edit_key or not edit_key[5]:
+            edits.append(None)
+            continue
+        edits.append(
+            ImageEditParams(
+                crop_box=edit_key[0],
+                max_width=edit_key[1],
+                max_height=edit_key[2],
+                aspect_ratio=edit_key[3],
+                aspect_label=edit_key[4],
+                is_active=edit_key[5],
+            )
+        )
     batch = estimate_batch(
         list(file_data),
         quality=quality,
         resize_pct=resize_pct,
         target_bytes=target_bytes,
         encode_options=encode_options,
+        edits=edits,
     )
     if not batch:
         return ()
@@ -603,8 +719,32 @@ def cached_batch_estimate(
 
 
 @st.cache_data(show_spinner=False)
-def cached_thumbnail(file_digest: str, file_bytes: bytes) -> bytes | None:
+def cached_thumbnail(file_digest: str, file_bytes: bytes, edit_key: tuple | None = None) -> bytes | None:
+    if edit_key:
+        from image_editor import ImageEditParams, prepare_image_from_bytes
+
+        params = ImageEditParams(
+            crop_box=edit_key[0],
+            max_width=edit_key[1],
+            max_height=edit_key[2],
+            aspect_ratio=edit_key[3],
+            aspect_label=edit_key[4],
+            is_active=edit_key[5],
+        )
+        if has_active_edits(params):
+            try:
+                prepared = prepare_image_from_bytes(file_bytes, edit_params=params)
+                return make_thumbnail(prepared)
+            except Exception:
+                return make_thumbnail(file_bytes)
     return make_thumbnail(file_bytes)
+
+
+def thumbnail_edit_key(file_id: str) -> tuple | None:
+    params = get_file_edit(file_id)
+    if not params or not has_active_edits(params):
+        return None
+    return params.cache_key()
 
 
 def load_estimates(
@@ -625,6 +765,7 @@ def load_estimates(
             encode_options.strip_metadata,
             encode_options.output_webp,
             encode_options.output_avif,
+            tuple(thumbnail_edit_key(file_id) for file_id in file_ids),
         ),
         tuple(file_data),
     )
@@ -1338,6 +1479,134 @@ def show_mp4_compress_dialog() -> None:
         )
 
 
+@st.dialog("Edit image", width="large")
+def show_edit_dialog(file_id: str) -> None:
+    info = st.session_state.batch_files.get(file_id)
+    if not info:
+        st.warning("File not found.")
+        return
+
+    file_bytes = read_bytes(info)
+    error = validate_image(file_bytes, info["name"])
+    if error:
+        st.error(error)
+        return
+
+    existing = get_file_edit(file_id)
+    oriented = load_oriented_image(file_bytes)
+    image_width, image_height = oriented.size
+    preview_png = oriented_preview_bytes(file_bytes)
+    preview_b64 = base64.b64encode(preview_png).decode("ascii")
+
+    st.markdown(
+        f'<div class="edit-dialog-path">{html.escape(info["relative_path"])}</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="edit-dialog-dims">Source: {image_width}×{image_height} px (orientation corrected)</div>',
+        unsafe_allow_html=True,
+    )
+
+    aspect_default = aspect_choice_from_params(existing)
+    if aspect_default == "Original" and existing and existing.aspect_ratio is None:
+        aspect_default = "Original"
+    aspect_index = ASPECT_RATIO_CHOICES.index(aspect_default) if aspect_default in ASPECT_RATIO_CHOICES else 0
+
+    controls_col, crop_col = st.columns([1, 2.2], gap="medium")
+    with controls_col:
+        st.markdown('<div class="ecam-field-label">Aspect ratio</div>', unsafe_allow_html=True)
+        aspect_choice = st.selectbox(
+            "Aspect ratio",
+            ASPECT_RATIO_CHOICES,
+            index=aspect_index,
+            label_visibility="collapsed",
+            key=f"edit_aspect_{file_id}",
+        )
+        st.markdown('<div class="ecam-field-label">Max dimensions</div>', unsafe_allow_html=True)
+        max_width = st.number_input(
+            "Max width (px)",
+            min_value=0,
+            max_value=20000,
+            value=int(existing.max_width or 0) if existing and existing.max_width else 0,
+            step=1,
+            key=f"edit_max_w_{file_id}",
+            help="0 = no limit. Image is scaled down only.",
+        )
+        max_height = st.number_input(
+            "Max height (px)",
+            min_value=0,
+            max_value=20000,
+            value=int(existing.max_height or 0) if existing and existing.max_height else 0,
+            step=1,
+            key=f"edit_max_h_{file_id}",
+            help="0 = no limit. Image is scaled down only.",
+        )
+        st.markdown(
+            '<p class="upload-hint">Edited files ignore the sidebar Resize % slider.</p>',
+            unsafe_allow_html=True,
+        )
+
+    with crop_col:
+        st.markdown('<div class="edit-dialog-crop-anchor"></div>', unsafe_allow_html=True)
+        crop_data = image_cropper(
+            preview_b64,
+            aspect_ratio=aspect_ratio_for_cropper(aspect_choice, image_width, image_height),
+            initial_crop=crop_box_to_initial_crop(existing.crop_box if existing else None),
+            key=f"edit_cropper_{file_id}",
+        )
+
+    draft_crop = crop_data_to_box(crop_data) or (existing.crop_box if existing else None)
+    draft_max_w = normalize_max_dimension(max_width)
+    draft_max_h = normalize_max_dimension(max_height)
+    draft_params = ImageEditParams(
+        crop_box=draft_crop,
+        max_width=draft_max_w,
+        max_height=draft_max_h,
+        aspect_ratio=ASPECT_RATIO_MAP.get(aspect_choice),
+        aspect_label=aspect_choice,
+        is_active=True,
+    )
+    out_w, out_h = preview_dimensions(file_bytes, draft_params)
+    crop_w = (draft_crop[2] - draft_crop[0]) if draft_crop else image_width
+    crop_h = (draft_crop[3] - draft_crop[1]) if draft_crop else image_height
+    st.markdown(
+        f'<div class="edit-dialog-preview">'
+        f"Crop region: <strong>{crop_w}×{crop_h}</strong> → output: <strong>{out_w}×{out_h}</strong>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    cancel_col, reset_col, apply_col = st.columns(3)
+    with cancel_col:
+        if st.button("CANCEL", key=f"edit_cancel_{file_id}", use_container_width=True):
+            st.session_state.edit_dialog_file_id = None
+            st.rerun()
+    with reset_col:
+        if st.button("RESET EDITS", key=f"edit_reset_{file_id}", use_container_width=True):
+            clear_file_edit(file_id)
+            st.session_state.edit_dialog_file_id = None
+            st.rerun()
+    with apply_col:
+        if st.button("APPLY", type="primary", key=f"edit_apply_{file_id}", use_container_width=True):
+            crop_box = crop_data_to_box(crop_data)
+            if crop_box is None:
+                crop_box = (0, 0, image_width, image_height)
+            params = ImageEditParams(
+                crop_box=crop_box,
+                max_width=draft_max_w,
+                max_height=draft_max_h,
+                aspect_ratio=ASPECT_RATIO_MAP.get(aspect_choice),
+                aspect_label=aspect_choice,
+                is_active=True,
+            )
+            st.session_state.file_edits[file_id] = params
+            st.session_state.results_by_id.pop(file_id, None)
+            st.session_state.pop("results", None)
+            st.session_state.download_ready = False
+            st.session_state.edit_dialog_file_id = None
+            st.rerun()
+
+
 @st.dialog("Compare", width="large")
 def show_compare_dialog(result: ConversionResult) -> None:
     safe_path = html.escape(result.relative_path)
@@ -1435,7 +1704,11 @@ def render_thumbnail_grid(
                     thumb = None
                 else:
                     data = preview.read_data()
-                    thumb = cached_thumbnail(make_file_id(data), data)
+                    thumb = cached_thumbnail(
+                        make_file_id(data),
+                        data,
+                        thumbnail_edit_key(preview.file_id),
+                    )
 
                 single_cls = " card-unit-single" if row_width == 1 else ""
                 state_cls = ""
@@ -1471,39 +1744,56 @@ def render_thumbnail_grid(
                         unsafe_allow_html=True,
                     )
 
-                    if result and result.success and not read_only:
+                    if not preview.unsupported_error and not read_only:
                         st.markdown('<div class="card-actions-anchor"></div>', unsafe_allow_html=True)
-                        a0, a1, a2, a3 = st.columns(4)
-                        with a0:
+                        if result and result.success:
+                            a0, a1, a2, a3, a4 = st.columns(5)
+                            with a0:
+                                if st.button(
+                                    "✎",
+                                    key=f"ed_{preview.file_id}_{page}",
+                                    help="Edit",
+                                    use_container_width=True,
+                                ):
+                                    show_edit_dialog(preview.file_id)
+                            with a1:
+                                if st.button(
+                                    "👁",
+                                    key=f"pv_{preview.file_id}_{page}",
+                                    help="Compare",
+                                    use_container_width=True,
+                                ):
+                                    show_compare_dialog(result)
+                            with a2:
+                                render_result_downloads(result, key_prefix="dl", page=page)
+                            with a3:
+                                if st.button(
+                                    "↻",
+                                    key=f"rc_{preview.file_id}_{page}",
+                                    help="Re-convert",
+                                    use_container_width=True,
+                                ):
+                                    reconvert_file(preview.file_id, quality, resize_pct, target_kb)
+                                    st.rerun()
+                            with a4:
+                                include = st.checkbox(
+                                    "ZIP",
+                                    value=preview.file_id not in excluded,
+                                    key=f"zip_{preview.file_id}_{page}",
+                                    label_visibility="collapsed",
+                                )
+                                if include:
+                                    excluded.discard(preview.file_id)
+                                else:
+                                    excluded.add(preview.file_id)
+                        else:
                             if st.button(
-                                "👁",
-                                key=f"pv_{preview.file_id}_{page}",
-                                help="Compare",
+                                "✎ EDIT",
+                                key=f"edw_{preview.file_id}_{page}",
+                                help="Edit before convert",
                                 use_container_width=True,
                             ):
-                                show_compare_dialog(result)
-                        with a1:
-                            render_result_downloads(result, key_prefix="dl", page=page)
-                        with a2:
-                            if st.button(
-                                "↻",
-                                key=f"rc_{preview.file_id}_{page}",
-                                help="Re-convert",
-                                use_container_width=True,
-                            ):
-                                reconvert_file(preview.file_id, quality, resize_pct, target_kb)
-                                st.rerun()
-                        with a3:
-                            include = st.checkbox(
-                                "ZIP",
-                                value=preview.file_id not in excluded,
-                                key=f"zip_{preview.file_id}_{page}",
-                                label_visibility="collapsed",
-                            )
-                            if include:
-                                excluded.discard(preview.file_id)
-                            else:
-                                excluded.add(preview.file_id)
+                                show_edit_dialog(preview.file_id)
 
 
 def render_list_row_actions(
@@ -1517,8 +1807,17 @@ def render_list_row_actions(
 ) -> None:
     excluded = st.session_state.excluded_zip_ids
     st.markdown('<div class="list-actions-anchor"></div>', unsafe_allow_html=True)
+    if preview.unsupported_error:
+        if st.button("×", key=f"lrmu_{preview.file_id}_{page}", help="Remove"):
+            remove_batch_file(preview.file_id)
+            st.rerun()
+        return
+
     if result and result.success:
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c0, c1, c2, c3, c4, c5 = st.columns(6)
+        with c0:
+            if st.button("✎", key=f"led_{preview.file_id}_{page}", help="Edit", use_container_width=True):
+                show_edit_dialog(preview.file_id)
         with c1:
             if st.button("👁", key=f"lpv_{preview.file_id}_{page}", help="Compare", use_container_width=True):
                 show_compare_dialog(result)
@@ -1544,9 +1843,14 @@ def render_list_row_actions(
                 remove_batch_file(preview.file_id)
                 st.rerun()
     else:
-        if st.button("×", key=f"lrmu_{preview.file_id}_{page}", help="Remove"):
-            remove_batch_file(preview.file_id)
-            st.rerun()
+        c0, c1 = st.columns(2)
+        with c0:
+            if st.button("✎", key=f"ledw_{preview.file_id}_{page}", help="Edit", use_container_width=True):
+                show_edit_dialog(preview.file_id)
+        with c1:
+            if st.button("×", key=f"lrmu_{preview.file_id}_{page}", help="Remove", use_container_width=True):
+                remove_batch_file(preview.file_id)
+                st.rerun()
 
 
 def render_list_view(
@@ -1573,7 +1877,11 @@ def render_list_view(
             thumb = None
         else:
             data = preview.read_data()
-            thumb = cached_thumbnail(make_file_id(data), data)
+            thumb = cached_thumbnail(
+                make_file_id(data),
+                data,
+                thumbnail_edit_key(preview.file_id),
+            )
 
         state_cls = ""
         if badge == "Failed":
@@ -1899,6 +2207,7 @@ def run_conversion(
         resize_pct=resize_pct,
         target_bytes=target_bytes,
         encode_options=encode_options,
+        edits_by_id=st.session_state.file_edits,
     )
     partial_results: dict[str, ConversionResult] = {}
     live_status = {job.file_id: "converting" for job in jobs}

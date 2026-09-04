@@ -11,6 +11,8 @@ from typing import Callable
 
 from PIL import Image
 
+from image_editor import ImageEditParams, has_active_edits, prepare_image_from_bytes
+
 try:
     from pillow_heif import register_heif_opener
 
@@ -98,6 +100,7 @@ class ConvertJob:
     avif_name: str
     quality: int
     encode_options: EncodeOptions | None = None
+    edit_params: ImageEditParams | None = None
 
 
 def make_thumbnail(source: bytes | Image.Image, size: tuple[int, int] = THUMBNAIL_SIZE) -> bytes | None:
@@ -307,16 +310,19 @@ def resolve_encode_quality(
     target_bytes: int | None = None,
     file_bytes: bytes | None = None,
     resize_pct: int = 100,
+    edit_params: ImageEditParams | None = None,
 ) -> int:
     opts = encode_options or EncodeOptions()
     if opts.lossless:
         return 100
     if target_bytes and file_bytes is not None:
+        effective_resize = 100 if has_active_edits(edit_params) else resize_pct
         return find_quality_for_target_size(
             file_bytes,
             target_bytes,
-            resize_pct=resize_pct,
+            resize_pct=effective_resize,
             encode_options=opts,
+            edit_params=edit_params,
         )
     if opts.output_avif and not opts.output_webp:
         return AVIF_ONLY_QUALITY
@@ -330,18 +336,14 @@ def _webp_size_from_bytes(
     resize_pct: int = 100,
     fast: bool = False,
     encode_options: EncodeOptions | None = None,
+    edit_params: ImageEditParams | None = None,
 ) -> int:
-    with Image.open(io.BytesIO(file_bytes)) as image:
-        image.load()
-        prepared = _prepare_image(image)
-        if resize_pct < 100:
-            scale = resize_pct / 100
-            new_size = (
-                max(1, int(prepared.width * scale)),
-                max(1, int(prepared.height * scale)),
-            )
-            prepared = prepared.resize(new_size, Image.Resampling.LANCZOS)
-        return len(_encode_webp(prepared, quality, fast=fast, encode_options=encode_options))
+    prepared = prepare_image_from_bytes(
+        file_bytes,
+        resize_pct=resize_pct,
+        edit_params=edit_params,
+    )
+    return len(_encode_webp(prepared, quality, fast=fast, encode_options=encode_options))
 
 
 def _avif_size_from_bytes(
@@ -351,18 +353,14 @@ def _avif_size_from_bytes(
     resize_pct: int = 100,
     fast: bool = False,
     encode_options: EncodeOptions | None = None,
+    edit_params: ImageEditParams | None = None,
 ) -> int:
-    with Image.open(io.BytesIO(file_bytes)) as image:
-        image.load()
-        prepared = _prepare_image(image)
-        if resize_pct < 100:
-            scale = resize_pct / 100
-            new_size = (
-                max(1, int(prepared.width * scale)),
-                max(1, int(prepared.height * scale)),
-            )
-            prepared = prepared.resize(new_size, Image.Resampling.LANCZOS)
-        return len(_encode_avif(prepared, quality, fast=fast, encode_options=encode_options))
+    prepared = prepare_image_from_bytes(
+        file_bytes,
+        resize_pct=resize_pct,
+        edit_params=edit_params,
+    )
+    return len(_encode_avif(prepared, quality, fast=fast, encode_options=encode_options))
 
 
 def _encode_size_from_bytes(
@@ -372,6 +370,7 @@ def _encode_size_from_bytes(
     resize_pct: int = 100,
     fast: bool = False,
     encode_options: EncodeOptions | None = None,
+    edit_params: ImageEditParams | None = None,
 ) -> int:
     opts = encode_options or EncodeOptions()
     if opts.output_avif and not opts.output_webp:
@@ -381,6 +380,7 @@ def _encode_size_from_bytes(
             resize_pct=resize_pct,
             fast=fast,
             encode_options=opts,
+            edit_params=edit_params,
         )
     return _webp_size_from_bytes(
         file_bytes,
@@ -388,6 +388,7 @@ def _encode_size_from_bytes(
         resize_pct=resize_pct,
         fast=fast,
         encode_options=opts,
+        edit_params=edit_params,
     )
 
 
@@ -399,6 +400,7 @@ def find_quality_for_target_size(
     min_quality: int = 20,
     max_quality: int = 95,
     encode_options: EncodeOptions | None = None,
+    edit_params: ImageEditParams | None = None,
 ) -> int:
     if target_bytes <= 0:
         return min_quality
@@ -410,6 +412,7 @@ def find_quality_for_target_size(
             resize_pct=resize_pct,
             fast=True,
             encode_options=encode_options,
+            edit_params=edit_params,
         ) <= target_bytes:
             return max_quality
     except Exception:
@@ -426,6 +429,7 @@ def find_quality_for_target_size(
                 resize_pct=resize_pct,
                 fast=True,
                 encode_options=encode_options,
+                edit_params=edit_params,
             )
         except Exception:
             return DEFAULT_QUALITY
@@ -481,6 +485,7 @@ def _estimate_one(
     resize_pct: int,
     target_bytes: int | None = None,
     encode_options: EncodeOptions | None = None,
+    edit_params: ImageEditParams | None = None,
 ) -> FileEstimate:
     original_bytes = len(data)
     opts = encode_options or EncodeOptions()
@@ -490,6 +495,7 @@ def _estimate_one(
         target_bytes=target_bytes,
         file_bytes=data,
         resize_pct=resize_pct,
+        edit_params=edit_params,
     )
     try:
         webp_bytes = _encode_size_from_bytes(
@@ -498,6 +504,7 @@ def _estimate_one(
             resize_pct=resize_pct,
             fast=True,
             encode_options=opts,
+            edit_params=edit_params,
         )
     except Exception:
         webp_bytes = original_bytes
@@ -511,9 +518,14 @@ def estimate_batch(
     resize_pct: int = 100,
     target_bytes: int | None = None,
     encode_options: EncodeOptions | None = None,
+    edits: list[ImageEditParams | None] | None = None,
 ) -> BatchEstimate | None:
     if not files:
         return None
+
+    edit_list = edits or [None] * len(files)
+    if len(edit_list) != len(files):
+        edit_list = [None] * len(files)
 
     if len(files) == 1:
         name, data = files[0]
@@ -526,6 +538,7 @@ def estimate_batch(
                     resize_pct=resize_pct,
                     target_bytes=target_bytes,
                     encode_options=encode_options,
+                    edit_params=edit_list[0],
                 )
             ]
         )
@@ -535,14 +548,15 @@ def estimate_batch(
         results = list(
             pool.map(
                 lambda item: _estimate_one(
-                    item[0],
-                    item[1],
+                    item[0][0],
+                    item[0][1],
                     quality=quality,
                     resize_pct=resize_pct,
                     target_bytes=target_bytes,
                     encode_options=encode_options,
+                    edit_params=item[1],
                 ),
-                files,
+                zip(files, edit_list, strict=True),
             )
         )
     return BatchEstimate(files=results)
@@ -560,6 +574,7 @@ def convert_image(
     webp_name: str | None = None,
     avif_name: str | None = None,
     encode_options: EncodeOptions | None = None,
+    edit_params: ImageEditParams | None = None,
 ) -> ConversionResult:
     used = used_names if used_names is not None else set()
     rel = relative_path or filename
@@ -573,33 +588,27 @@ def convert_image(
     effective_quality = 100 if opts.lossless else quality
 
     try:
-        with Image.open(io.BytesIO(file_bytes)) as image:
-            image.load()
-            prepared = _prepare_image(image)
+        prepared = prepare_image_from_bytes(
+            file_bytes,
+            resize_pct=resize_pct,
+            edit_params=edit_params,
+        )
 
-            if resize_pct < 100:
-                scale = resize_pct / 100
-                new_size = (
-                    max(1, int(prepared.width * scale)),
-                    max(1, int(prepared.height * scale)),
+        webp_data = b""
+        avif_data = b""
+        avif_quality = effective_quality
+        if opts.output_webp:
+            webp_data = _encode_webp(prepared, effective_quality, encode_options=opts)
+        if opts.output_avif:
+            if opts.output_webp and webp_data and not opts.lossless:
+                avif_quality = find_avif_quality_for_webp_half_size(
+                    prepared,
+                    webp_data,
+                    encode_options=opts,
+                    target_ratio=opts.avif_target_webp_pct / 100.0,
                 )
-                prepared = prepared.resize(new_size, Image.Resampling.LANCZOS)
-
-            webp_data = b""
-            avif_data = b""
-            avif_quality = effective_quality
-            if opts.output_webp:
-                webp_data = _encode_webp(prepared, effective_quality, encode_options=opts)
-            if opts.output_avif:
-                if opts.output_webp and webp_data and not opts.lossless:
-                    avif_quality = find_avif_quality_for_webp_half_size(
-                        prepared,
-                        webp_data,
-                        encode_options=opts,
-                        target_ratio=opts.avif_target_webp_pct / 100.0,
-                    )
-                avif_data = _encode_avif(prepared, avif_quality, encode_options=opts)
-            webp_preview = make_thumbnail(prepared)
+            avif_data = _encode_avif(prepared, avif_quality, encode_options=opts)
+        webp_preview = make_thumbnail(prepared)
 
         if not webp_data and not avif_data:
             raise RuntimeError("No output format selected.")
@@ -652,6 +661,7 @@ def _run_convert_job(job: ConvertJob, resize_pct: int) -> ConversionResult:
         webp_name=job.webp_name,
         avif_name=job.avif_name,
         encode_options=job.encode_options,
+        edit_params=job.edit_params,
     )
 
 
@@ -662,18 +672,22 @@ def build_convert_jobs(
     resize_pct: int,
     target_bytes: int | None = None,
     encode_options: EncodeOptions | None = None,
+    edits_by_id: dict[str, ImageEditParams] | None = None,
 ) -> list[ConvertJob]:
     used_names: set[str] = set()
     jobs: list[ConvertJob] = []
+    edits = edits_by_id or {}
     for file_id, relative_path, data in items:
         rel = relative_path.replace("\\", "/")
         opts = encode_options or EncodeOptions()
+        edit_params = edits.get(file_id)
         effective_quality = resolve_encode_quality(
             quality,
             encode_options=opts,
             target_bytes=target_bytes,
             file_bytes=data,
             resize_pct=resize_pct,
+            edit_params=edit_params,
         )
         jobs.append(
             ConvertJob(
@@ -684,6 +698,7 @@ def build_convert_jobs(
                 avif_name=avif_name_for_relative(rel, used_names) if opts.output_avif else "",
                 quality=effective_quality,
                 encode_options=opts,
+                edit_params=edit_params,
             )
         )
     return jobs
