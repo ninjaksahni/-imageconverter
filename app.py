@@ -40,6 +40,7 @@ from converter import (
 )
 from image_editor import (
     ImageEditParams,
+    edit_before_after_preview_bytes,
     has_active_edits,
     load_oriented_image,
     normalize_max_dimension,
@@ -396,6 +397,35 @@ def single_result_download_payload(result: ConversionResult) -> tuple[bytes, str
     )
 
 
+def format_edit_output_size_label(result: ConversionResult) -> str:
+    if not result.success:
+        return "—"
+    if result.webp_bytes > 0 and result.avif_bytes > 0:
+        return f"{format_bytes(result.webp_bytes)} webp · {format_bytes(result.avif_bytes)} avif"
+    if result.avif_bytes > 0:
+        return format_bytes(result.avif_bytes)
+    if result.webp_bytes > 0:
+        return format_bytes(result.webp_bytes)
+    return "—"
+
+
+@st.cache_data(show_spinner=False)
+def cached_edit_before_after_preview(
+    file_digest: str,
+    edit_key: tuple,
+    file_bytes: bytes,
+) -> tuple[bytes, bytes]:
+    params = ImageEditParams(
+        crop_box=edit_key[0],
+        max_width=edit_key[1],
+        max_height=edit_key[2],
+        aspect_ratio=edit_key[3],
+        aspect_label=edit_key[4],
+        is_active=edit_key[5],
+    )
+    return edit_before_after_preview_bytes(file_bytes, params)
+
+
 @st.cache_data(show_spinner=False)
 def cached_edit_convert_download(
     file_digest: str,
@@ -404,7 +434,7 @@ def cached_edit_convert_download(
     file_bytes: bytes,
     relative_path: str,
     file_id: str,
-) -> tuple[bytes, str, str, bool, str | None]:
+) -> tuple[bytes, str, str, bool, str | None, str]:
     (
         quality,
         resize_pct,
@@ -451,7 +481,7 @@ def cached_edit_convert_download(
         edit_params=edit_params,
     )
     payload = single_result_download_payload(result)
-    return (*payload, result.success, result.error)
+    return (*payload, result.success, result.error, format_edit_output_size_label(result))
 
 
 def on_edit_convert_download(
@@ -1812,7 +1842,7 @@ def show_edit_dialog(file_id: str) -> None:
     )
     quality, resize_pct, target_kb, quality_mode = get_convert_settings()
     encode_options = get_encode_options()
-    dl_data, dl_name, dl_mime, dl_ok, dl_error = cached_edit_convert_download(
+    dl_data, dl_name, dl_mime, dl_ok, dl_error, output_size_label = cached_edit_convert_download(
         make_file_id(file_bytes),
         draft_params.cache_key(),
         (
@@ -1837,8 +1867,20 @@ def show_edit_dialog(file_id: str) -> None:
     st.markdown(
         f'<div class="edit-dialog-preview">'
         f"Crop region: <strong>{crop_w}×{crop_h}</strong> → output: <strong>{out_w}×{out_h}</strong>"
+        f" · <strong>{html.escape(output_size_label)}</strong>"
         f"</div>",
         unsafe_allow_html=True,
+    )
+
+    before_bytes, after_bytes = cached_edit_before_after_preview(
+        make_file_id(file_bytes),
+        draft_params.cache_key(),
+        file_bytes,
+    )
+    st.markdown('<div class="edit-dialog-compare-heading">Before / after</div>', unsafe_allow_html=True)
+    render_sync_compare_view(
+        [("Original", before_bytes, "orig"), ("Edited", after_bytes, "edit")],
+        element_id=f"editprev-{file_id}",
     )
 
     cancel_col, reset_col, apply_col, convert_col = st.columns(4)

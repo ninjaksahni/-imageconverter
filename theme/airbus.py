@@ -966,6 +966,11 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
 .edit-dialog-crop-anchor + iframe {{
     border: 1px solid {BORDER}; border-radius: 2px; background: {BG_DEEP};
 }}
+.edit-dialog-compare-heading {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN};
+    margin: 0.85rem 0 0.45rem;
+}}
 
 /* MP4 compress dialog */
 .mp4-probe-grid {{

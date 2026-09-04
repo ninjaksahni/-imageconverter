@@ -156,3 +156,37 @@ def oriented_preview_bytes(file_bytes: bytes, *, max_edge: int = 1600) -> tuple[
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     return buffer.getvalue(), scale
+
+
+def _preview_png(image: Image.Image, *, max_edge: int = 720) -> bytes:
+    preview = image.copy()
+    if preview.mode not in ("RGB", "RGBA"):
+        preview = preview.convert("RGBA" if "A" in preview.mode else "RGB")
+    width, height = preview.size
+    longest = max(width, height)
+    if longest > max_edge:
+        scale = max_edge / longest
+        preview = preview.resize(
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    buffer = io.BytesIO()
+    preview.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def edit_before_after_preview_bytes(
+    file_bytes: bytes,
+    params: ImageEditParams | None,
+    *,
+    max_edge: int = 720,
+) -> tuple[bytes, bytes]:
+    oriented = load_oriented_image(file_bytes)
+    prepared = _prepare_image(oriented)
+    before_png = _preview_png(prepared, max_edge=max_edge)
+    if has_active_edits(params):
+        edited = apply_image_edits(prepared, params)
+    else:
+        edited = prepared
+    after_png = _preview_png(edited, max_edge=max_edge)
+    return before_png, after_png
