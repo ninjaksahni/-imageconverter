@@ -18,7 +18,7 @@ A Streamlit app that converts up to 100 images to WebP format and lets you downl
 ## Requirements
 
 - Python 3.10+
-- **FFmpeg** (includes `ffmpeg` and `ffprobe` on PATH) for MP4 compression
+- **FFmpeg** for MP4 compression — installed automatically via `static-ffmpeg` in `requirements.txt`, or use a system install:
 
 ```bash
 # macOS
@@ -27,6 +27,8 @@ brew install ffmpeg
 # Debian/Ubuntu
 sudo apt install ffmpeg
 ```
+
+System FFmpeg is preferred when available; otherwise the app downloads bundled binaries on first use.
 
 ## Local development
 
@@ -44,7 +46,7 @@ streamlit run app.py
 3. Connect the repository and set **Main file path** to `app.py`.
 4. Deploy.
 
-Streamlit Cloud installs system packages from [`packages.txt`](packages.txt) (includes `ffmpeg`).
+No `packages.txt` is required — FFmpeg is provided by the `static-ffmpeg` Python package so deployment avoids apt repository issues on Streamlit Cloud.
 
 ## Project structure
 
@@ -55,6 +57,5 @@ video_compressor.py # MP4 probe/compress via FFmpeg
 storage.py          # Disk-backed upload storage
 theme/airbus.py     # Airbus HMI theme and CSS
 requirements.txt
-packages.txt        # System packages for Streamlit Cloud
 .streamlit/config.toml
 ```

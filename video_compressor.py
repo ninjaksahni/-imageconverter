@@ -117,6 +117,36 @@ def _stderr_tail(stderr: str, lines: int = 20) -> str:
     return "\n".join(parts[-lines:]) if parts else "Unknown FFmpeg error."
 
 
+_ffmpeg_exe: str | None = None
+_ffprobe_exe: str | None = None
+
+
+def _resolve_ffmpeg_binaries() -> tuple[str, str]:
+    global _ffmpeg_exe, _ffprobe_exe
+    if _ffmpeg_exe and _ffprobe_exe:
+        return _ffmpeg_exe, _ffprobe_exe
+
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if ffmpeg and ffprobe:
+        _ffmpeg_exe, _ffprobe_exe = ffmpeg, ffprobe
+        return ffmpeg, ffprobe
+
+    from static_ffmpeg import run
+
+    ffmpeg, ffprobe = run.get_or_fetch_platform_executables_else_raise()
+    _ffmpeg_exe, _ffprobe_exe = ffmpeg, ffprobe
+    return ffmpeg, ffprobe
+
+
+def _ffmpeg_binary() -> str:
+    return _resolve_ffmpeg_binaries()[0]
+
+
+def _ffprobe_binary() -> str:
+    return _resolve_ffmpeg_binaries()[1]
+
+
 def _format_ffmpeg_runtime_error(binary: str, detail: str) -> str:
     lowered = detail.lower()
     if "library not loaded" in lowered or "dyld" in lowered:
@@ -134,11 +164,11 @@ def _format_ffmpeg_runtime_error(binary: str, detail: str) -> str:
     return f"{binary} failed: {compact}"
 
 
-def _verify_ffmpeg_binary(binary: str) -> tuple[bool, str]:
-    if shutil.which(binary) is None:
-        return False, f"{binary} not found on PATH. Install FFmpeg to use MP4 compression."
+def _verify_ffmpeg_binary(binary_path: str, label: str) -> tuple[bool, str]:
+    if not binary_path:
+        return False, f"{label} not found on PATH. Install FFmpeg to use MP4 compression."
     result = subprocess.run(
-        [binary, "-version"],
+        [binary_path, "-version"],
         capture_output=True,
         text=True,
         check=False,
@@ -146,12 +176,20 @@ def _verify_ffmpeg_binary(binary: str) -> tuple[bool, str]:
     if result.returncode == 0:
         return True, ""
     detail = (result.stderr or result.stdout or "").strip()
-    return False, _format_ffmpeg_runtime_error(binary, detail)
+    return False, _format_ffmpeg_runtime_error(label, detail)
 
 
 def check_ffmpeg_available() -> tuple[bool, str]:
-    for binary in ("ffmpeg", "ffprobe"):
-        ok, message = _verify_ffmpeg_binary(binary)
+    try:
+        ffmpeg, ffprobe = _resolve_ffmpeg_binaries()
+    except Exception as exc:
+        return False, (
+            "FFmpeg is not available. Install FFmpeg locally "
+            "(e.g. `brew install ffmpeg`) or ensure `static-ffmpeg` is installed."
+            f" ({exc})"
+        )
+    for label, binary_path in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe)):
+        ok, message = _verify_ffmpeg_binary(binary_path, label)
         if not ok:
             return False, message
     return True, ""
@@ -220,7 +258,7 @@ def probe_video(path: Path | str) -> VideoProbe:
 
     result = subprocess.run(
         [
-            "ffprobe",
+            _ffprobe_binary(),
             "-v",
             "quiet",
             "-print_format",
@@ -456,7 +494,7 @@ def _build_ffmpeg_command(
     options: VideoCompressOptions,
 ) -> list[str]:
     cmd = [
-        "ffmpeg",
+        _ffmpeg_binary(),
         "-y",
         "-hide_banner",
         "-loglevel",
@@ -495,7 +533,7 @@ def _probe_output_video(path: Path) -> tuple[int | None, int | None]:
     try:
         result = subprocess.run(
             [
-                "ffprobe",
+                _ffprobe_binary(),
                 "-v",
                 "quiet",
                 "-select_streams",
