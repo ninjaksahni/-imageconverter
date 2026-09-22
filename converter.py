@@ -31,6 +31,7 @@ MAX_CONVERT_WORKERS = 8
 OUTPUT_FORMAT_WEBP = "webp"
 OUTPUT_FORMAT_AVIF = "avif"
 OUTPUT_FORMAT_BOTH = "both"
+OUTPUT_FORMAT_PNG = "png"
 AVIF_TARGET_WEBP_SIZE_RATIO = 0.5
 AVIF_MIN_QUALITY = 20
 AVIF_MAX_QUALITY = 100
@@ -52,6 +53,9 @@ class ConversionResult:
     avif_name: str = ""
     avif_bytes: int = 0
     avif_data: bytes = b""
+    png_name: str = ""
+    png_bytes: int = 0
+    png_data: bytes = b""
     quality_used: int = DEFAULT_QUALITY
     avif_quality_used: int = 0
     error: str | None = None
@@ -67,7 +71,9 @@ class ConversionResult:
     def primary_output_bytes(self) -> int:
         if self.webp_bytes > 0:
             return self.webp_bytes
-        return self.avif_bytes
+        if self.avif_bytes > 0:
+            return self.avif_bytes
+        return self.png_bytes
 
     @property
     def preview_data(self) -> bytes | None:
@@ -80,6 +86,7 @@ class EncodeOptions:
     strip_metadata: bool = False
     output_webp: bool = True
     output_avif: bool = False
+    output_png: bool = False
     avif_target_webp_pct: int = 50
 
     @classmethod
@@ -88,6 +95,8 @@ class EncodeOptions:
             return cls(output_webp=False, output_avif=True, **kwargs)
         if output_format == OUTPUT_FORMAT_BOTH:
             return cls(output_webp=True, output_avif=True, **kwargs)
+        if output_format == OUTPUT_FORMAT_PNG:
+            return cls(output_webp=False, output_avif=False, output_png=True, **kwargs)
         return cls(output_webp=True, output_avif=False, **kwargs)
 
 
@@ -98,6 +107,7 @@ class ConvertJob:
     data: bytes
     webp_name: str
     avif_name: str
+    png_name: str
     quality: int
     encode_options: EncodeOptions | None = None
     edit_params: ImageEditParams | None = None
@@ -202,6 +212,33 @@ def avif_name_for_relative(
         counter += 1
 
 
+def png_name_for_relative(
+    relative_path: str,
+    used_names: set[str],
+    width: int,
+    height: int,
+) -> str:
+    path = PurePosixPath(relative_path.replace("\\", "/"))
+    parent = str(path.parent) if path.parent != PurePosixPath(".") else ""
+    stem = path.stem
+    dim = f"{width}x{height}"
+    base = f"{stem}_png_{dim}.png"
+    candidate = f"{parent}/{base}" if parent else base
+
+    if candidate not in used_names:
+        used_names.add(candidate)
+        return candidate
+
+    counter = 1
+    while True:
+        alt = f"{stem}_png_{dim}_{counter}.png"
+        candidate = f"{parent}/{alt}" if parent else alt
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        counter += 1
+
+
 def _prepare_image(image: Image.Image) -> Image.Image:
     if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
         return image.convert("RGBA")
@@ -261,6 +298,28 @@ def _encode_avif(
     else:
         save_kwargs["speed"] = 6
     prepared.save(buffer, **save_kwargs)
+    return buffer.getvalue()
+
+
+def _png_compress_level(quality: int) -> int:
+    return max(0, min(9, int((100 - quality) * 9 / 100)))
+
+
+def _encode_png(
+    image: Image.Image,
+    quality: int,
+    *,
+    encode_options: EncodeOptions | None = None,
+) -> bytes:
+    opts = encode_options or EncodeOptions()
+    prepared = _strip_metadata(image) if opts.strip_metadata else image
+    buffer = io.BytesIO()
+    prepared.save(
+        buffer,
+        format="PNG",
+        optimize=True,
+        compress_level=_png_compress_level(quality),
+    )
     return buffer.getvalue()
 
 
@@ -338,6 +397,8 @@ def resolve_encode_quality(
         )
     if opts.output_avif and not opts.output_webp:
         return AVIF_ONLY_QUALITY
+    if opts.output_png and not opts.output_webp and not opts.output_avif:
+        return quality
     return quality
 
 
@@ -375,6 +436,22 @@ def _avif_size_from_bytes(
     return len(_encode_avif(prepared, quality, fast=fast, encode_options=encode_options))
 
 
+def _png_size_from_bytes(
+    file_bytes: bytes,
+    *,
+    quality: int = DEFAULT_QUALITY,
+    resize_pct: int = 100,
+    encode_options: EncodeOptions | None = None,
+    edit_params: ImageEditParams | None = None,
+) -> int:
+    prepared = prepare_image_from_bytes(
+        file_bytes,
+        resize_pct=resize_pct,
+        edit_params=edit_params,
+    )
+    return len(_encode_png(prepared, quality, encode_options=encode_options))
+
+
 def _encode_size_from_bytes(
     file_bytes: bytes,
     *,
@@ -385,6 +462,14 @@ def _encode_size_from_bytes(
     edit_params: ImageEditParams | None = None,
 ) -> int:
     opts = encode_options or EncodeOptions()
+    if opts.output_png and not opts.output_webp and not opts.output_avif:
+        return _png_size_from_bytes(
+            file_bytes,
+            quality=quality,
+            resize_pct=resize_pct,
+            encode_options=opts,
+            edit_params=edit_params,
+        )
     if opts.output_avif and not opts.output_webp:
         return _avif_size_from_bytes(
             file_bytes,
@@ -585,6 +670,7 @@ def convert_image(
     used_names: set[str] | None = None,
     webp_name: str | None = None,
     avif_name: str | None = None,
+    png_name: str | None = None,
     encode_options: EncodeOptions | None = None,
     edit_params: ImageEditParams | None = None,
 ) -> ConversionResult:
@@ -598,6 +684,7 @@ def convert_image(
     effective_quality = 100 if opts.lossless else quality
     output_webp_name = webp_name or ""
     output_avif_name = avif_name or ""
+    output_png_name = png_name or ""
 
     try:
         prepared = prepare_image_from_bytes(
@@ -610,9 +697,12 @@ def convert_image(
             output_webp_name = webp_name_for_relative(rel, used, out_width, out_height)
         if opts.output_avif and not output_avif_name:
             output_avif_name = avif_name_for_relative(rel, used, out_width, out_height)
+        if opts.output_png and not output_png_name:
+            output_png_name = png_name_for_relative(rel, used, out_width, out_height)
 
         webp_data = b""
         avif_data = b""
+        png_data = b""
         avif_quality = effective_quality
         if opts.output_webp:
             webp_data = _encode_webp(prepared, effective_quality, encode_options=opts)
@@ -625,9 +715,12 @@ def convert_image(
                     target_ratio=opts.avif_target_webp_pct / 100.0,
                 )
             avif_data = _encode_avif(prepared, avif_quality, encode_options=opts)
+        if opts.output_png:
+            png_quality = effective_quality if not opts.lossless else 95
+            png_data = _encode_png(prepared, png_quality, encode_options=opts)
         webp_preview = make_thumbnail(prepared)
 
-        if not webp_data and not avif_data:
+        if not webp_data and not avif_data and not png_data:
             raise RuntimeError("No output format selected.")
 
         return ConversionResult(
@@ -643,6 +736,9 @@ def convert_image(
             avif_name=output_avif_name,
             avif_bytes=len(avif_data),
             avif_data=avif_data,
+            png_name=output_png_name,
+            png_bytes=len(png_data),
+            png_data=png_data,
             success=True,
             quality_used=effective_quality if not opts.lossless else 100,
             avif_quality_used=avif_quality if opts.output_avif else 0,
@@ -661,6 +757,9 @@ def convert_image(
             avif_name=output_avif_name,
             avif_bytes=0,
             avif_data=b"",
+            png_name=output_png_name,
+            png_bytes=0,
+            png_data=b"",
             success=False,
             quality_used=quality,
             error=str(exc),
@@ -677,6 +776,7 @@ def _run_convert_job(job: ConvertJob, resize_pct: int) -> ConversionResult:
         resize_pct=resize_pct,
         webp_name=job.webp_name,
         avif_name=job.avif_name,
+        png_name=job.png_name,
         encode_options=job.encode_options,
         edit_params=job.edit_params,
     )
@@ -722,6 +822,9 @@ def build_convert_jobs(
                 else "",
                 avif_name=avif_name_for_relative(rel, used_names, out_width, out_height)
                 if opts.output_avif
+                else "",
+                png_name=png_name_for_relative(rel, used_names, out_width, out_height)
+                if opts.output_png
                 else "",
                 quality=effective_quality,
                 encode_options=opts,
@@ -776,6 +879,9 @@ def convert_batch_parallel(
                     avif_name=job.avif_name,
                     avif_bytes=0,
                     avif_data=b"",
+                    png_name=job.png_name,
+                    png_bytes=0,
+                    png_data=b"",
                     success=False,
                     quality_used=job.quality,
                     error=str(exc),
@@ -807,6 +913,8 @@ def build_zip(results: list[ConversionResult], excluded_ids: set[str] | None = N
                     archive.writestr(result.webp_name.replace("\\", "/"), result.webp_data)
                 if result.avif_data:
                     archive.writestr(result.avif_name.replace("\\", "/"), result.avif_data)
+                if result.png_data:
+                    archive.writestr(result.png_name.replace("\\", "/"), result.png_data)
     buffer.seek(0)
     return buffer.getvalue()
 

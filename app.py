@@ -23,6 +23,7 @@ from converter import (
     ConversionResult,
     OUTPUT_FORMAT_AVIF,
     OUTPUT_FORMAT_BOTH,
+    OUTPUT_FORMAT_PNG,
     OUTPUT_FORMAT_WEBP,
     EncodeOptions,
     FileEstimate,
@@ -99,11 +100,12 @@ GRID_FILTERS: dict[str, str] = {
 
 SMALL_BATCH_THRESHOLD = 8
 
-OUTPUT_FORMAT_CHOICES = ["WebP only", "AVIF only", "AVIF Plus"]
+OUTPUT_FORMAT_CHOICES = ["WebP only", "AVIF only", "AVIF Plus", "PNG only"]
 OUTPUT_FORMAT_MAP = {
     "WebP only": OUTPUT_FORMAT_WEBP,
     "AVIF only": OUTPUT_FORMAT_AVIF,
     "AVIF Plus": OUTPUT_FORMAT_BOTH,
+    "PNG only": OUTPUT_FORMAT_PNG,
 }
 
 COMPRESSION_PRESETS: dict[str, dict] = {
@@ -333,6 +335,8 @@ def convert_file_with_edit_params(
                 used.add(existing.webp_name)
             if existing.avif_name:
                 used.add(existing.avif_name)
+            if existing.png_name:
+                used.add(existing.png_name)
     return convert_image(
         data,
         info["relative_path"],
@@ -390,6 +394,12 @@ def single_result_download_payload(result: ConversionResult) -> tuple[bytes, str
             basename_from_relative(result.avif_name),
             "image/avif",
         )
+    if result.png_data:
+        return (
+            result.png_data,
+            basename_from_relative(result.png_name),
+            "image/png",
+        )
     return (
         result.webp_data,
         basename_from_relative(result.webp_name),
@@ -406,6 +416,8 @@ def format_edit_output_size_label(result: ConversionResult) -> str:
         return format_bytes(result.avif_bytes)
     if result.webp_bytes > 0:
         return format_bytes(result.webp_bytes)
+    if result.png_bytes > 0:
+        return format_bytes(result.png_bytes)
     return "—"
 
 
@@ -511,6 +523,8 @@ def on_edit_convert_download(
 
 
 def result_quality_label(result: ConversionResult) -> str:
+    if result.png_bytes > 0 and not result.webp_bytes and not result.avif_bytes:
+        return "PNG"
     if result.quality_used >= 100 and (not result.avif_bytes or result.avif_quality_used >= 100):
         return "Lossless"
     if result.webp_bytes > 0 and result.avif_bytes > 0 and result.avif_quality_used:
@@ -531,6 +545,11 @@ def result_output_size_label(result: ConversionResult) -> str:
         if result.webp_bytes > 0:
             label += " avif"
         parts.append(label)
+    if result.png_bytes > 0:
+        label = format_bytes(result.png_bytes)
+        if parts:
+            label += " png"
+        parts.append(label)
     return " · ".join(parts) if parts else "—"
 
 
@@ -540,6 +559,8 @@ def zip_output_bytes(result: ConversionResult) -> int:
         total += result.webp_bytes
     if result.avif_data:
         total += result.avif_bytes
+    if result.png_data:
+        total += result.png_bytes
     return total
 
 
@@ -551,6 +572,7 @@ def render_result_downloads(
 ) -> None:
     has_webp = bool(result.webp_data)
     has_avif = bool(result.avif_data)
+    has_png = bool(result.png_data)
     if has_webp and has_avif:
         w_col, a_col = st.columns(2)
         with w_col:
@@ -581,6 +603,16 @@ def render_result_downloads(
             mime="image/avif",
             key=f"{key_prefix}_{result.file_id}_{page}",
             help="Download AVIF",
+            use_container_width=True,
+        )
+    elif has_png:
+        st.download_button(
+            "↓",
+            data=result.png_data,
+            file_name=basename_from_relative(result.png_name),
+            mime="image/png",
+            key=f"{key_prefix}_{result.file_id}_{page}",
+            help="Download PNG",
             use_container_width=True,
         )
     else:
@@ -723,7 +755,13 @@ def clear_all_files() -> None:
 
 
 def zip_download_name() -> str:
-    return f"webp_{datetime.now().strftime('%Y-%m-%d_%H%M')}.zip"
+    prefix = {
+        OUTPUT_FORMAT_WEBP: "webp",
+        OUTPUT_FORMAT_AVIF: "avif",
+        OUTPUT_FORMAT_BOTH: "images",
+        OUTPUT_FORMAT_PNG: "png",
+    }.get(get_output_format_key(), "images")
+    return f"{prefix}_{datetime.now().strftime('%Y-%m-%d_%H%M')}.zip"
 
 
 def on_zip_download() -> None:
@@ -851,6 +889,8 @@ def reconvert_file(file_id: str, quality: int, resize_pct: int, target_kb: int |
                 used.add(existing.webp_name)
             if existing.avif_name:
                 used.add(existing.avif_name)
+            if existing.png_name:
+                used.add(existing.png_name)
     result = convert_image(
         data,
         info["relative_path"],
@@ -1953,6 +1993,8 @@ def show_compare_dialog(result: ConversionResult) -> None:
         compare_panels.append(("WebP output", result.webp_data, "webp"))
     if result.avif_data:
         compare_panels.append(("AVIF output", result.avif_data, "avif"))
+    if result.png_data:
+        compare_panels.append(("PNG output", result.png_data, "png"))
     if compare_panels:
         render_sync_compare_view(compare_panels, element_id=f"cmp-{result.file_id}")
     output_summary = result_output_size_label(result)
@@ -2591,6 +2633,9 @@ def run_conversion(
                     avif_name=job.avif_name,
                     avif_bytes=0,
                     avif_data=b"",
+                    png_name=job.png_name,
+                    png_bytes=0,
+                    png_data=b"",
                     success=False,
                     quality_used=job.quality,
                     error=str(exc),
@@ -2865,6 +2910,14 @@ with st.sidebar:
             help="Target AVIF file size as a percentage of the WebP output.",
         )
         render_avif_format_hint("AVIF Plus")
+    if st.session_state.sq_output_format == "PNG only":
+        st.markdown(
+            '<div class="mp4-auto-summary">'
+            "<strong>PNG:</strong> Lossless output with transparency preserved. "
+            "The quality slider controls PNG compression level; use Resize to reduce file size."
+            "</div>",
+            unsafe_allow_html=True,
+        )
     st.checkbox(
         "Lossless output",
         key="sq_lossless",
