@@ -1106,6 +1106,255 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     font-family: 'Inter', sans-serif; font-size: 0.82rem; color: {TEXT_MUTED};
     text-align: center; padding: 2rem 1rem;
 }}
+
+/* Mission header */
+.mission-header-anchor {{ display: none; }}
+[data-testid="stVerticalBlock"]:has(> .stElementContainer .mission-header-anchor) {{
+    margin-bottom: 0.65rem !important;
+}}
+.mission-header {{
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 0.65rem; background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 3px;
+    padding: 0.55rem 0.75rem;
+}}
+.mission-callsign {{
+    font-family: 'Inter', sans-serif; font-size: 0.72rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.14em; color: {CYAN};
+}}
+.mission-phase-wrap {{
+    display: flex; align-items: center; gap: 0.45rem;
+}}
+.mission-phase-label {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {TEXT_MUTED};
+}}
+.mission-phase {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {GREEN};
+    padding: 0.2rem 0.45rem; border: 1px solid {GREEN}; border-radius: 2px;
+    background: rgba(0, 200, 83, 0.08);
+}}
+.mission-phase.phase-converting {{ color: {CYAN}; border-color: {CYAN}; background: rgba(0, 212, 255, 0.08); }}
+.mission-phase.phase-standby {{ color: {TEXT_MUTED}; border-color: {BORDER}; background: {BG_DEEP}; }}
+.mission-phase.phase-caution {{ color: {AMBER}; border-color: {AMBER}; background: rgba(255, 179, 0, 0.08); }}
+.mission-count {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; font-weight: 600;
+    color: {TEXT_MUTED}; letter-spacing: 0.06em;
+}}
+.mission-count strong {{ color: {WHITE}; }}
+.mission-lamp {{
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+}}
+.mission-lamp .lamp-dot {{ width: 6px; height: 6px; border-radius: 1px; }}
+
+/* Procedure panel — stepper + controls unified */
+.procedure-panel-anchor {{ display: none; }}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) {{
+    margin: 0 0 0.75rem 0 !important; background: {BG_PANEL} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) > [data-testid="stVerticalBlock"] {{
+    gap: 0.5rem !important; padding: 0.65rem 0.75rem 0.6rem !important;
+}}
+.workflow-stepper.procedure-embedded {{
+    background: transparent; border: none; border-radius: 0;
+    padding: 0 0 0.65rem 0; margin-bottom: 0;
+    border-bottom: 1px solid {BORDER};
+}}
+.procedure-controls-anchor {{ display: none; }}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) .procedure-controls-anchor + [data-testid="stHorizontalBlock"] {{
+    align-items: center !important; margin-top: 0.15rem !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) [data-testid="stHorizontalBlock"]:has(.hmi-convert-anchor) [data-testid="column"],
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) [data-testid="stHorizontalBlock"]:has(.hmi-bar-clear-anchor) [data-testid="column"],
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) [data-testid="stHorizontalBlock"]:has(.hmi-dl-col-anchor) [data-testid="column"] {{
+    display: flex !important; align-items: center !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) [data-testid="stDownloadButton"] > button,
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) [data-testid="stButton"] > button {{
+    min-height: 2.45rem !important; margin: 0 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.procedure-panel-anchor) [data-testid="column"]:has(.download-opts-anchor) {{
+    justify-content: center !important;
+}}
+
+/* Config tape */
+.config-tape-anchor {{ display: none; }}
+.config-tape {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 600;
+    letter-spacing: 0.06em; color: {TEXT_MUTED}; text-transform: uppercase;
+    background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 2px;
+    padding: 0.4rem 0.65rem; margin-bottom: 0.65rem; line-height: 1.45;
+    overflow-x: auto; white-space: nowrap;
+}}
+.config-tape-dirty {{
+    color: {AMBER}; border-color: {AMBER};
+    background: rgba(255, 179, 0, 0.06);
+    border-left: 3px solid {AMBER};
+}}
+
+/* Drop bay */
+.drop-bay-anchor {{ display: none; }}
+.drop-bay-header {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em; color: {CYAN};
+    margin: 0 0 0.35rem 0;
+}}
+.drop-bay-copy {{
+    font-family: 'Inter', sans-serif; font-size: 0.74rem; color: {TEXT_MUTED};
+    margin: 0 0 0.5rem 0; line-height: 1.45;
+}}
+.drop-bay-compact-line {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 600;
+    color: {TEXT_MUTED}; letter-spacing: 0.06em; margin-bottom: 0.35rem;
+}}
+.drop-bay-compact-line strong {{ color: {GREEN}; }}
+.drop-bay-chips {{
+    display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.55rem;
+}}
+.drop-bay-chip {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.54rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: {CYAN};
+    border: 1px solid {BORDER}; border-radius: 2px; padding: 0.15rem 0.4rem;
+    background: {BG_DEEP};
+}}
+[data-testid="stVerticalBlock"]:has(.drop-bay-anchor) [data-testid="stFileUploader"] section {{
+    border-style: dashed !important; min-height: 128px !important;
+}}
+[data-testid="stVerticalBlock"]:has(.drop-bay-compact) [data-testid="stFileUploader"] section {{
+    min-height: 76px !important; padding: 0.85rem 1rem !important;
+}}
+[data-testid="stVerticalBlock"]:has(.drop-bay-anchor) [data-testid="stFileUploader"] section:hover {{
+    border-color: {CYAN} !important;
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.12) !important;
+}}
+
+/* Main telemetry strip */
+.main-telemetry-anchor {{ display: none; }}
+.main-telemetry {{
+    background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 3px;
+    padding: 0.55rem 0.75rem; margin-bottom: 0.75rem;
+}}
+.main-telemetry-title {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {CYAN}; margin-bottom: 0.35rem;
+}}
+.main-telemetry-copy {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.66rem; color: {TEXT_MUTED}; line-height: 1.45;
+}}
+.main-telemetry-copy strong {{ color: {GREEN}; }}
+.main-telemetry .estimate-bar {{ margin: 0.4rem 0 0.25rem; }}
+
+/* Advisory strip */
+.advisory-strip {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    padding: 0.4rem 0.6rem; margin-bottom: 0.65rem; border-radius: 2px;
+    letter-spacing: 0.04em; line-height: 1.45;
+}}
+.advisory-strip-warn {{
+    border-left: 3px solid {AMBER}; background: rgba(255, 179, 0, 0.07); color: {AMBER};
+}}
+.advisory-strip-fail {{
+    border-left: 3px solid {RED}; background: rgba(255, 61, 61, 0.07); color: {RED};
+}}
+.advisory-strip-item {{ display: block; }}
+
+/* Download ready banner */
+.download-ready-banner {{
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 0.5rem; background: rgba(0, 200, 83, 0.08); border: 1px solid {GREEN};
+    border-radius: 2px; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem;
+    animation: hmi-border-pulse 1.4s ease-in-out infinite;
+}}
+.download-ready-banner-title {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em; color: {GREEN};
+}}
+.download-ready-banner-detail {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; color: {TEXT_MUTED};
+}}
+
+/* Grid sticky header + density */
+.grid-sticky-header-anchor {{ display: none; }}
+section.stMain div[data-testid="stVerticalBlock"]:has(> .stElementContainer .grid-sticky-header-anchor) {{
+    position: sticky; top: 0; z-index: 12;
+    background: {BG_PANEL}; border-bottom: 1px solid {BORDER};
+    padding: 0.35rem 0 0.45rem; margin-bottom: 0.35rem;
+}}
+.grid-density-dense-anchor {{ display: none; }}
+section.stMain div[data-testid="stVerticalBlock"]:has(.grid-density-dense-anchor) .thumb-frame {{
+    max-height: 72px !important;
+}}
+section.stMain div[data-testid="stVerticalBlock"]:has(.grid-density-dense-anchor) .thumb-card .meta {{
+    min-height: 1.2rem;
+}}
+.grid-toolbar-row {{
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.35rem;
+}}
+.grid-toolbar-actions {{
+    display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;
+}}
+.density-anchor {{ display: none; }}
+[data-testid="column"]:has(.density-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important; font-size: 0.54rem !important;
+    font-weight: 600 !important; letter-spacing: 0.05em !important;
+    text-transform: uppercase !important; background: transparent !important;
+    color: {TEXT_MUTED} !important; border: none !important;
+    border-radius: 0 !important; min-height: 1.35rem !important;
+    padding: 0.1rem 0.35rem !important; box-shadow: none !important;
+}}
+[data-testid="column"]:has(.density-anchor) [data-testid="stButton"] button:hover {{
+    color: {CYAN} !important;
+}}
+[data-testid="column"]:has(.density-anchor.density-active) [data-testid="stButton"] button {{
+    color: {GREEN} !important; border-bottom: 2px solid {GREEN} !important;
+}}
+.thumb-card-inner:hover {{
+    border-color: {CYAN} !important;
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.12) !important;
+}}
+.card-savings {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 700;
+    color: {GREEN}; margin-top: 0.15rem;
+}}
+.workflow-step.done.download-ready-pulse {{
+    animation: hmi-border-pulse 1.2s ease-in-out infinite;
+}}
+
+/* Pagination HMI */
+.pagination-anchor {{ display: none; }}
+[data-testid="stHorizontalBlock"]:has(.pagination-prev-anchor) {{
+    align-items: center !important; margin-top: 0.55rem !important;
+    background: {BG_DEEP}; border: 1px solid {BORDER}; border-radius: 2px;
+    padding: 0.35rem 0.5rem !important;
+}}
+[data-testid="column"]:has(.pagination-prev-anchor) [data-testid="stButton"] button,
+[data-testid="column"]:has(.pagination-next-anchor) [data-testid="stButton"] button {{
+    font-family: 'IBM Plex Mono', monospace !important; font-size: 0.62rem !important;
+    font-weight: 600 !important; letter-spacing: 0.08em !important;
+    text-transform: uppercase !important; background: {BG_PANEL} !important;
+    color: {TEXT_MUTED} !important; border: 1px solid {BORDER} !important;
+    border-radius: 2px !important; min-height: 1.85rem !important;
+}}
+[data-testid="column"]:has(.pagination-prev-anchor) [data-testid="stButton"] button:hover:not(:disabled),
+[data-testid="column"]:has(.pagination-next-anchor) [data-testid="stButton"] button:hover:not(:disabled) {{
+    border-color: {CYAN} !important; color: {CYAN} !important;
+}}
+.pagination-label {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    color: {TEXT_MUTED}; text-align: center; text-transform: uppercase;
+    letter-spacing: 0.08em;
+}}
+.empty-step.active-step {{
+    color: {CYAN}; border-color: {CYAN}; background: rgba(0, 212, 255, 0.06);
+}}
+.empty-preflight-hint {{
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.56rem; color: {TEXT_MUTED};
+    margin-top: 0.65rem; letter-spacing: 0.06em;
+}}
+.empty-preflight-hint strong {{ color: {CYAN}; }}
 """
 
 
@@ -1208,17 +1457,20 @@ def render_empty_state() -> None:
         f"""
         <div class="empty-state">
             <div class="empty-state-icon">⬆</div>
-            <div class="empty-state-title">Drop images to begin</div>
+            <div class="empty-state-title">Preflight</div>
             <div class="empty-state-copy">
-                Upload individual images or a ZIP archive. Folder paths are preserved in the output ZIP.
+                Drop images in the bay above, adjust settings in the ECAM panel, then run convert.
             </div>
             <div class="empty-steps">
-                <span class="empty-step">1 · Upload</span>
+                <span class="empty-step active-step">1 · Upload</span>
                 <span class="empty-step">2 · Convert</span>
                 <span class="empty-step">3 · Download</span>
             </div>
             <div class="empty-formats">
                 JPEG · PNG · GIF · WebP · HEIC · TIFF · BMP · ICO
+            </div>
+            <div class="empty-preflight-hint">
+                Adjust output in <strong>ECAM panel ←</strong> · Video via <strong>Compress MP4</strong>
             </div>
         </div>
         """,
@@ -1249,6 +1501,7 @@ def render_workflow_stepper(
     can_download: bool,
     converting: bool = False,
     download_ready: bool = False,
+    embedded: bool = False,
 ) -> None:
     """Main-area UPLOAD → CONVERT → DOWNLOAD procedure strip."""
     upload_done = has_files
@@ -1259,15 +1512,17 @@ def render_workflow_stepper(
     download_active = has_results and can_download and not converting and not download_done
 
     steps = [
-        ("Upload", upload_done, upload_active, False),
-        ("Convert", convert_done, convert_active, converting),
-        ("Download", download_done, download_active, False),
+        ("Upload", upload_done, upload_active, False, False),
+        ("Convert", convert_done, convert_active, converting, False),
+        ("Download", download_done, download_active, False, download_done),
     ]
 
     parts: list[str] = []
-    for i, (label, done, active, pulse) in enumerate(steps):
+    for i, (label, done, active, pulse, ready_pulse) in enumerate(steps):
         if done:
             cls = "workflow-step done"
+            if ready_pulse:
+                cls += " download-ready-pulse"
         elif active:
             cls = "workflow-step active" + (" converting" if pulse else "")
         else:
@@ -1279,8 +1534,149 @@ def render_workflow_stepper(
             conn_done = steps[i][1]
             parts.append(f'<div class="workflow-connector{" done" if conn_done else ""}"></div>')
 
+    stepper_cls = "workflow-stepper procedure-embedded" if embedded else "workflow-stepper"
     st.markdown(
-        f'<div class="workflow-stepper">{"".join(parts)}</div>',
+        f'<div class="{stepper_cls}">{"".join(parts)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_mission_header(
+    *,
+    phase: str,
+    status: str,
+    file_count: int,
+    max_files: int,
+) -> None:
+    """Top-of-main cockpit header with phase, status lamp, and file count."""
+    lamp_class = {"Normal": "lamp-norm", "Caution": "lamp-adv", "Error": "lamp-fail"}.get(
+        status, "lamp-norm"
+    )
+    phase_key = phase.lower()
+    phase_cls = "mission-phase"
+    if phase_key in ("standby", "idle"):
+        phase_cls += " phase-standby"
+    elif phase_key == "converting":
+        phase_cls += " phase-converting"
+    elif status in ("Caution", "Error"):
+        phase_cls += " phase-caution"
+    st.markdown(
+        f"""
+        <div class="mission-header-anchor"></div>
+        <div class="mission-header">
+            <span class="mission-callsign">Image Converter</span>
+            <div class="mission-phase-wrap">
+                <span class="mission-phase-label">Phase</span>
+                <span class="{phase_cls}">{html.escape(phase)}</span>
+                <span class="mission-lamp {lamp_class}">
+                    <span class="lamp-dot"></span>{html.escape(status)}
+                </span>
+            </div>
+            <span class="mission-count">Files <strong>{file_count}/{max_files}</strong></span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_config_tape(line: str, *, dirty: bool = False) -> None:
+    dirty_cls = " config-tape-dirty" if dirty else ""
+    st.markdown(
+        f'<div class="config-tape-anchor"></div>'
+        f'<div class="config-tape{dirty_cls}">{html.escape(line)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_drop_bay_header(*, compact: bool, file_count: int) -> None:
+    compact_cls = " drop-bay-compact" if compact else ""
+    st.markdown(f'<div class="drop-bay-anchor{compact_cls}"></div>', unsafe_allow_html=True)
+    if compact:
+        st.markdown(
+            f'<div class="drop-bay-compact-line">'
+            f"<strong>{file_count}</strong> file{'s' if file_count != 1 else ''} loaded · "
+            f"+ Add more images or ZIP"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        return
+    st.markdown('<div class="drop-bay-header">Drop Bay</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="drop-bay-copy">'
+        "Upload individual images or a ZIP archive. Folder paths are preserved in the output ZIP."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    chips = ("JPEG", "PNG", "GIF", "WEBP", "HEIC", "TIFF", "BMP", "ZIP")
+    chip_html = "".join(f'<span class="drop-bay-chip">{c}</span>' for c in chips)
+    st.markdown(f'<div class="drop-bay-chips">{chip_html}</div>', unsafe_allow_html=True)
+
+
+def render_main_telemetry(
+    *,
+    mode: str,
+    original_bytes: int,
+    output_bytes: int,
+    savings_pct: float,
+    total_files: int,
+    detail: str = "",
+) -> None:
+    from converter import format_bytes
+
+    saved = max(0.0, savings_pct)
+    bar_width = min(100, max(4, saved))
+    title = "Estimate" if mode == "estimate" else "Results"
+    if mode == "estimate":
+        copy = (
+            f"<strong>{format_bytes(max(0, original_bytes - output_bytes))}</strong> saved"
+            f" · <strong>{saved:.0f}%</strong><br>"
+            f"{format_bytes(original_bytes)} → ~{format_bytes(output_bytes)}"
+        )
+    else:
+        copy = (
+            f"{format_bytes(original_bytes)} → <strong>{format_bytes(output_bytes)}</strong>"
+            f" · saved <strong>{saved:.0f}%</strong>"
+        )
+        if detail:
+            copy += f"<br>{html.escape(detail)}"
+    st.markdown(
+        f"""
+        <div class="main-telemetry-anchor"></div>
+        <div class="main-telemetry">
+            <div class="main-telemetry-title">{title}</div>
+            <div class="main-telemetry-copy">{copy}</div>
+            <div class="estimate-bar"><div class="estimate-bar-fill" style="width: {bar_width}%;"></div></div>
+            <div class="main-telemetry-copy">{total_files} file(s)</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_advisory_strip(messages: list[tuple[str, str]]) -> None:
+    if not messages:
+        return
+    level = "fail" if any(level == "fail" for _, level in messages) else "warn"
+    items = "".join(
+        f'<span class="advisory-strip-item">{html.escape(text)}</span>'
+        for text, _ in messages
+    )
+    st.markdown(
+        f'<div class="advisory-strip advisory-strip-{level}">{items}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_download_ready_banner(*, file_count: int, output_size: str) -> None:
+    st.markdown(
+        f"""
+        <div class="download-ready-banner">
+            <span class="download-ready-banner-title">Output ready</span>
+            <span class="download-ready-banner-detail">
+                {file_count} file{'s' if file_count != 1 else ''} · {html.escape(output_size)}
+            </span>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 

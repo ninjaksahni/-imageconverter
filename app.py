@@ -7,6 +7,7 @@ import hashlib
 import html
 import math
 import re
+import time
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -53,11 +54,18 @@ from storage import (
     save_upload,
 )
 from theme.airbus import (
+    render_advisory_strip,
     render_airbus_css,
+    render_config_tape,
     render_convert_blink_css,
+    render_download_ready_banner,
     render_download_ready_css,
+    render_drop_bay_header,
     render_empty_state,
     render_estimate_panel,
+    render_converting_strip,
+    render_main_telemetry,
+    render_mission_header,
     render_results_summary,
     render_status_panel,
     render_video_probe_panel,
@@ -146,6 +154,7 @@ def init_batch_state() -> None:
         "clear_after_download": False,
         "download_ready": False,
         "grid_view_mode": "list",
+        "grid_density": "comfort",
         "sq_lossless": False,
         "sq_strip_metadata": False,
         "sq_out_webp": True,
@@ -958,6 +967,67 @@ def get_phase(has_files: bool, has_results: bool) -> str:
     if has_files:
         return "Ready"
     return "Idle"
+
+
+def get_mission_phase(
+    *,
+    has_files: bool,
+    has_results: bool,
+    converting: bool = False,
+    download_ready: bool = False,
+) -> str:
+    if converting:
+        return "CONVERTING"
+    if has_results and download_ready:
+        return "READY"
+    if has_results:
+        return "COMPLETE"
+    if has_files:
+        return "LOADED"
+    return "STANDBY"
+
+
+def build_config_tape_line(
+    *,
+    quality_mode: str,
+    quality: int,
+    resize_pct: int,
+    target_kb: int | None,
+    encode_options: EncodeOptions,
+    settings_dirty: bool,
+) -> str:
+    if encode_options.lossless:
+        mode = "LOSSLESS"
+    elif quality_mode == "Target max file size" and target_kb is not None:
+        mode = f"TARGET {target_kb} KB"
+    else:
+        mode = f"FIXED Q{quality}"
+
+    formats: list[str] = []
+    if encode_options.output_webp:
+        formats.append("WEBP")
+    if encode_options.output_avif:
+        formats.append("AVIF")
+    if encode_options.output_png:
+        formats.append("PNG")
+    if encode_options.output_jpeg:
+        formats.append("JPEG")
+    fmt = "+".join(formats) if formats else "NONE"
+
+    parts = [f"MODE: {mode}", f"RESIZE {resize_pct}%", f"OUT: {fmt}"]
+    if encode_options.strip_metadata:
+        parts.append("META STRIP")
+    if settings_dirty:
+        parts.append("CONFIG CHANGED — RE-CONVERT")
+    return " · ".join(parts)
+
+
+def cards_per_row() -> int:
+    return 6 if st.session_state.get("grid_density") == "dense" else CARDS_PER_ROW
+
+
+def cards_per_page() -> int:
+    return 30 if st.session_state.get("grid_density") == "dense" else CARDS_PER_PAGE
 
 
 def get_status_label(preview_files: list[PreviewFile], failed_count: int) -> str:
@@ -2166,13 +2236,14 @@ def show_compare_dialog(result: ConversionResult) -> None:
 
 
 def grid_column_count(item_count: int) -> int:
+    max_cols = cards_per_row()
     if item_count <= 1:
         return 1
     if item_count <= 2:
         return 2
     if item_count <= 3:
-        return 3
-    return CARDS_PER_ROW
+        return min(3, max_cols)
+    return max_cols
 
 
 def card_html(
@@ -2185,6 +2256,7 @@ def card_html(
     failed: bool = False,
     unsupported: bool = False,
     excluded: bool = False,
+    savings_pct: float | None = None,
 ) -> str:
     classes = ["thumb-card"]
     if failed:
@@ -2195,12 +2267,16 @@ def card_html(
         classes.append("excluded")
     safe_name = html.escape(preview.relative_path)
     display = html.escape(truncate_name(preview.relative_path))
+    savings_html = ""
+    if savings_pct is not None and savings_pct > 0:
+        savings_html = f'<div class="card-savings">-{savings_pct:.0f}%</div>'
     return f"""
     <div class="{" ".join(classes)}">
         <span class="badge {badge_class}">{badge}</span>
         {_thumb_html(thumb_data)}
         <div class="filename" title="{safe_name}">{display}</div>
         <div class="meta">{html.escape(meta)}</div>
+        {savings_html}
     </div>
     """
 
@@ -2216,13 +2292,15 @@ def render_thumbnail_grid(
     target_kb: int | None,
     read_only: bool = False,
 ) -> None:
-    start = page * CARDS_PER_PAGE
-    chunk = files[start : start + CARDS_PER_PAGE]
+    per_page = cards_per_page()
+    row_size = cards_per_row()
+    start = page * per_page
+    chunk = files[start : start + per_page]
     excluded = st.session_state.excluded_zip_ids
 
     row_width = grid_column_count(len(chunk))
-    for row_start in range(0, len(chunk), CARDS_PER_ROW):
-        row_items = chunk[row_start : row_start + CARDS_PER_ROW]
+    for row_start in range(0, len(chunk), row_size):
+        row_items = chunk[row_start : row_start + row_size]
         cols = st.columns(grid_column_count(len(row_items)))
         for col, preview in zip(cols, row_items):
             with col:
@@ -2262,6 +2340,7 @@ def render_thumbnail_grid(
                                 remove_batch_file(preview.file_id)
                                 st.rerun()
 
+                    savings = result.savings_pct if result and result.success else None
                     st.markdown(
                         card_html(
                             preview,
@@ -2272,6 +2351,7 @@ def render_thumbnail_grid(
                             failed=badge == "Failed",
                             unsupported=bool(preview.unsupported_error),
                             excluded=preview.file_id in excluded,
+                            savings_pct=savings,
                         ),
                         unsafe_allow_html=True,
                     )
@@ -2562,7 +2642,22 @@ def render_view_mode_toggle(*, show: bool = True, active_mode: str | None = None
                 st.rerun()
 
 
-def render_control_bar(
+def render_density_toggle(*, show: bool = True) -> None:
+    if not show:
+        return
+    density = st.session_state.get("grid_density", "comfort")
+    d1, d2 = st.columns(2)
+    for col, key, label in ((d1, "comfort", "Comfort"), (d2, "dense", "Dense")):
+        with col:
+            active_cls = " density-active" if density == key else ""
+            st.markdown(f'<div class="density-anchor{active_cls}"></div>', unsafe_allow_html=True)
+            if st.button(label, key=f"density_{key}", use_container_width=True):
+                st.session_state.grid_density = key
+                st.session_state.grid_page = 0
+                st.rerun()
+
+
+def render_procedure_controls(
     *,
     convert_label: str,
     can_convert: bool,
@@ -2573,75 +2668,109 @@ def render_control_bar(
     convert_muted: bool = False,
     settings_dirty: bool = False,
 ) -> bool:
-    """Unified cockpit control bar. Returns True if convert was clicked."""
+    """Procedure panel action row. Returns True if convert was clicked."""
     hide_convert = download_ready and can_download and not settings_dirty
     convert_disabled = not can_convert or hide_convert
+    convert_clicked = False
 
-    with st.container(border=True):
-        st.markdown('<div class="hmi-control-bar-wrap"></div>', unsafe_allow_html=True)
-        convert_clicked = False
-
-        if hide_convert:
-            c_clear, c_dl = st.columns([1, 2])
-            cols = {"clear": c_clear, "dl": c_dl}
-        else:
-            c_conv, c_clear, c_dl = st.columns([2, 1, 2])
-            cols = {"conv": c_conv, "clear": c_clear, "dl": c_dl}
-            with c_conv:
-                muted_cls = " hmi-convert-muted" if convert_muted else ""
-                st.markdown(f'<div class="hmi-convert-anchor{muted_cls}"></div>', unsafe_allow_html=True)
-                convert_clicked = st.button(
-                    convert_label,
-                    type="secondary" if convert_muted else "primary",
-                    use_container_width=True,
-                    disabled=convert_disabled,
-                    key="main_convert_btn",
-                )
-
-        with cols["clear"]:
-            st.markdown('<div class="hmi-bar-clear-anchor"></div>', unsafe_allow_html=True)
-            st.button(
-                "CLR ALL",
-                type="secondary",
+    st.markdown('<div class="procedure-controls-anchor"></div>', unsafe_allow_html=True)
+    if hide_convert:
+        c_clear, c_dl = st.columns([1, 2])
+        cols = {"clear": c_clear, "dl": c_dl}
+    else:
+        c_conv, c_clear, c_dl = st.columns([2, 1, 2])
+        cols = {"conv": c_conv, "clear": c_clear, "dl": c_dl}
+        with c_conv:
+            muted_cls = " hmi-convert-muted" if convert_muted else ""
+            st.markdown(f'<div class="hmi-convert-anchor{muted_cls}"></div>', unsafe_allow_html=True)
+            convert_clicked = st.button(
+                convert_label,
+                type="secondary" if convert_muted else "primary",
                 use_container_width=True,
-                disabled=not has_batch,
-                on_click=clear_all_files,
-                key="main_clear_btn",
+                disabled=convert_disabled,
+                key="main_convert_btn",
             )
-        with cols["dl"]:
-            if has_results and can_download:
-                results = get_ordered_results()
-                successful = [r for r in results if r.success]
-                included = [r for r in successful if r.file_id not in st.session_state.excluded_zip_ids]
-                if included:
-                    dl_ready_cls = " hmi-dl-ready" if download_ready else ""
-                    st.markdown(
-                        f'<div class="hmi-dl-col-anchor hmi-btn-anchor hmi-btn-dl-anchor{dl_ready_cls}"></div>',
-                        unsafe_allow_html=True,
-                    )
-                    dl_label = f"DWNLD ZIP ({len(included)})"
-                    if download_ready:
-                        dl_label += " · READY"
-                    st.download_button(
-                        dl_label,
-                        data=build_zip(results, st.session_state.excluded_zip_ids),
-                        file_name=zip_download_name(),
-                        mime="application/zip",
-                        type="primary",
-                        use_container_width=True,
-                        on_click=on_zip_download,
-                        key="main_zip_download",
-                    )
-            else:
-                st.markdown('<div class="hmi-dl-col-anchor"></div>', unsafe_allow_html=True)
-        if has_results:
-            st.checkbox(
-                "Clear batch after download",
-                key="clear_after_download",
-                help="Removes all files from the batch after you download the ZIP.",
-            )
+
+    with cols["clear"]:
+        st.markdown('<div class="hmi-bar-clear-anchor"></div>', unsafe_allow_html=True)
+        st.button(
+            "CLR ALL",
+            type="secondary",
+            use_container_width=True,
+            disabled=not has_batch,
+            on_click=clear_all_files,
+            key="main_clear_btn",
+        )
+    with cols["dl"]:
+        if has_results and can_download:
+            results = get_ordered_results()
+            successful = [r for r in results if r.success]
+            included = [r for r in successful if r.file_id not in st.session_state.excluded_zip_ids]
+            if included:
+                dl_ready_cls = " hmi-dl-ready" if download_ready else ""
+                st.markdown(
+                    f'<div class="hmi-dl-col-anchor hmi-btn-anchor hmi-btn-dl-anchor{dl_ready_cls}"></div>',
+                    unsafe_allow_html=True,
+                )
+                dl_label = f"DWNLD ZIP ({len(included)})"
+                if download_ready:
+                    dl_label += " · READY"
+                st.download_button(
+                    dl_label,
+                    data=build_zip(results, st.session_state.excluded_zip_ids),
+                    file_name=zip_download_name(),
+                    mime="application/zip",
+                    type="primary",
+                    use_container_width=True,
+                    on_click=on_zip_download,
+                    key="main_zip_download",
+                )
+                st.markdown('<div class="download-opts-anchor"></div>', unsafe_allow_html=True)
+                st.checkbox(
+                    "Clear after download",
+                    key="clear_after_download",
+                    help="Removes all files from the batch after you download the ZIP.",
+                )
+        else:
+            st.markdown('<div class="hmi-dl-col-anchor"></div>', unsafe_allow_html=True)
 
     return convert_clicked
+
+
+def render_procedure_panel(
+    *,
+    has_files: bool,
+    has_results: bool,
+    can_download: bool,
+    converting: bool = False,
+    download_ready: bool = False,
+    convert_label: str,
+    can_convert: bool,
+    has_batch: bool,
+    convert_muted: bool = False,
+    settings_dirty: bool = False,
+) -> bool:
+    """Unified procedure panel: workflow stepper + action controls."""
+    with st.container(border=True):
+        st.markdown('<div class="procedure-panel-anchor"></div>', unsafe_allow_html=True)
+        render_workflow_stepper(
+            has_files=has_files,
+            has_results=has_results,
+            can_download=can_download,
+            converting=converting,
+            download_ready=download_ready,
+            embedded=True,
+        )
+        return render_procedure_controls(
+            convert_label=convert_label,
+            can_convert=can_convert,
+            has_batch=has_batch,
+            has_results=has_results,
+            can_download=can_download,
+            download_ready=download_ready,
+            convert_muted=convert_muted,
+            settings_dirty=settings_dirty,
+        )
 
 
 def effective_view_mode(file_count: int) -> str:
@@ -2671,10 +2800,12 @@ def render_grid_header(
     *,
     effective_view: str,
     show_view_toggle: bool,
+    show_density_toggle: bool,
 ) -> None:
     count = len(preview_files)
     status = filter_status_summary(preview_files, results_by_id, live_status)
-    col_title, col_toggle = st.columns([5, 1.2])
+    st.markdown('<div class="grid-sticky-header-anchor"></div>', unsafe_allow_html=True)
+    col_title, col_actions = st.columns([3.2, 2.8])
     with col_title:
         st.markdown(
             '<div class="grid-header-anchor"></div>'
@@ -2684,9 +2815,17 @@ def render_grid_header(
             f"</div>",
             unsafe_allow_html=True,
         )
-    with col_toggle:
-        if show_view_toggle:
-            render_view_mode_toggle(show=True, active_mode=effective_view)
+    with col_actions:
+        if show_density_toggle or show_view_toggle:
+            toggle_cols = st.columns(2 if show_density_toggle and show_view_toggle else 1)
+            idx = 0
+            if show_density_toggle:
+                with toggle_cols[idx]:
+                    render_density_toggle(show=True)
+                idx += 1
+            if show_view_toggle:
+                with toggle_cols[idx]:
+                    render_view_mode_toggle(show=True, active_mode=effective_view)
 
 
 def should_collapse_bulk(
@@ -2727,10 +2866,15 @@ def run_conversion(
     encode_options: EncodeOptions,
     *,
     grid_placeholder,
-    stepper_placeholder,
+    procedure_placeholder,
+    telemetry_placeholder,
     can_download: bool,
+    convert_label: str,
+    can_convert: bool,
+    has_batch: bool,
+    convert_muted: bool,
+    settings_dirty: bool,
 ) -> None:
-    progress = st.progress(0, text="Converting…")
     items = [(p.file_id, p.relative_path, p.read_data()) for p in supported_previews]
     target_bytes = target_kb * 1024 if target_kb else None
     jobs = build_convert_jobs(
@@ -2744,16 +2888,28 @@ def run_conversion(
     partial_results: dict[str, ConversionResult] = {}
     live_status = {job.file_id: "converting" for job in jobs}
     completed = 0
+    started_at = time.time()
 
     def refresh_ui() -> None:
-        with stepper_placeholder.container():
-            render_workflow_stepper(
+        elapsed = max(time.time() - started_at, 0.001)
+        rate = completed / elapsed if completed > 0 else 0
+        remaining = (len(jobs) - completed) / rate if rate > 0 else 0
+        eta_text = f"~{int(remaining)}s remaining" if remaining >= 1 else "Finishing…"
+        with procedure_placeholder.container():
+            render_procedure_panel(
                 has_files=True,
                 has_results=False,
                 can_download=can_download,
                 converting=True,
                 download_ready=False,
+                convert_label=convert_label,
+                can_convert=can_convert,
+                has_batch=has_batch,
+                convert_muted=convert_muted,
+                settings_dirty=settings_dirty,
             )
+        with telemetry_placeholder.container():
+            render_converting_strip(completed=completed, total=len(jobs), eta_text=eta_text)
         with grid_placeholder.container():
             render_grid_block(
                 preview_files,
@@ -2806,7 +2962,6 @@ def run_conversion(
                 if pending.file_id not in partial_results:
                     live_status[pending.file_id] = "converting"
             completed += 1
-            progress.progress(completed / len(jobs), text=f"Converted {completed} of {len(jobs)}")
             refresh_ui()
 
     for result in partial_results.values():
@@ -2825,7 +2980,6 @@ def run_conversion(
     }
     st.session_state.excluded_zip_ids = set()
     st.session_state.download_ready = True
-    progress.empty()
     st.rerun()
 
 
@@ -2854,12 +3008,14 @@ def render_grid_block(
         small_batch = len(preview_files) <= SMALL_BATCH_THRESHOLD
         effective_view = effective_view_mode(len(preview_files))
         show_view_toggle = len(preview_files) > 2
+        show_density_toggle = len(preview_files) > 2 and effective_view == "grid"
         render_grid_header(
             preview_files,
             results_by_id,
             live_status,
             effective_view=effective_view,
             show_view_toggle=show_view_toggle,
+            show_density_toggle=show_density_toggle,
         )
 
         collapse_bulk = should_collapse_bulk(preview_files, results_by_id)
@@ -2905,7 +3061,7 @@ def render_grid_block(
         return
 
     use_list_view = effective_view_mode(len(filtered_files)) == "list"
-    per_page = LIST_ROWS_PER_PAGE if use_list_view else CARDS_PER_PAGE
+    per_page = LIST_ROWS_PER_PAGE if use_list_view else cards_per_page()
     total_pages = max(1, math.ceil(len(filtered_files) / per_page))
     st.session_state.grid_page = min(page, total_pages - 1)
     page = st.session_state.grid_page
@@ -2943,20 +3099,26 @@ def render_grid_block(
         )
 
     if not live_only and total_pages > 1:
+        st.markdown('<div class="pagination-anchor"></div>', unsafe_allow_html=True)
         p1, p2, p3 = st.columns([1, 2, 1])
         with p1:
-            if st.button("← Prev", disabled=page <= 0, key="grid_prev"):
+            st.markdown('<div class="pagination-prev-anchor"></div>', unsafe_allow_html=True)
+            if st.button("← PREV", disabled=page <= 0, key="grid_prev"):
                 st.session_state.grid_page -= 1
                 st.rerun()
         with p2:
-            st.caption(f"Page {page + 1} of {total_pages}")
+            st.markdown(
+                f'<div class="pagination-label">Page {page + 1} of {total_pages}</div>',
+                unsafe_allow_html=True,
+            )
         with p3:
-            if st.button("Next →", disabled=page >= total_pages - 1, key="grid_next"):
+            st.markdown('<div class="pagination-next-anchor"></div>', unsafe_allow_html=True)
+            if st.button("NEXT →", disabled=page >= total_pages - 1, key="grid_next"):
                 st.session_state.grid_page += 1
                 st.rerun()
 
     if not live_only and has_results and len(preview_files) > 5:
-        with st.expander("Detailed table"):
+        with st.expander("Batch report"):
             results = get_ordered_results()
             st.dataframe(
                 [
@@ -2990,7 +3152,7 @@ def settings_changed(quality, resize_pct, target_kb, quality_mode, encode_option
 
 
 # --- Page ---
-st.set_page_config(page_title="Image to WebP", page_icon="🖼️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Image Converter", page_icon="🖼️", layout="wide", initial_sidebar_state="expanded")
 
 init_batch_state()
 render_airbus_css()
@@ -3156,25 +3318,67 @@ with st.sidebar:
             total_files=estimate.total_files,
         )
 
-# --- Main: stepper → upload → convert → grid ---
-stepper_slot = st.empty()
-
+# --- Main layout ---
 can_download = False
+included_results: list[ConversionResult] = []
 if has_results:
     _results = get_ordered_results()
     _successful = [r for r in _results if r.success]
-    _included = [r for r in _successful if r.file_id not in st.session_state.excluded_zip_ids]
-    can_download = bool(_included)
+    included_results = [r for r in _successful if r.file_id not in st.session_state.excluded_zip_ids]
+    can_download = bool(included_results)
 
-with stepper_slot.container():
-    render_workflow_stepper(
+settings_dirty = settings_changed(quality, resize_pct, target_kb, quality_mode, encode_options)
+can_convert = bool(supported_previews) and len(preview_files) <= MAX_FILES
+convert_label = "RE-CONVERT" if has_results and settings_dirty else "CONVERT"
+armed = can_convert and not has_results
+st.session_state["convert_armed"] = armed
+download_ready_flag = bool(st.session_state.get("download_ready"))
+convert_muted = bool(has_results and can_download and download_ready_flag)
+status_label = get_status_label(preview_files, failed_count)
+mission_phase = get_mission_phase(
+    has_files=bool(preview_files),
+    has_results=has_results,
+    download_ready=download_ready_flag and can_download,
+)
+
+procedure_slot = st.empty()
+telemetry_slot = st.empty()
+grid_slot = st.empty()
+
+render_mission_header(
+    phase=mission_phase,
+    status=status_label,
+    file_count=len(preview_files),
+    max_files=MAX_FILES,
+)
+
+with procedure_slot.container():
+    convert_clicked = render_procedure_panel(
         has_files=bool(preview_files),
         has_results=has_results,
         can_download=can_download,
         converting=False,
-        download_ready=bool(st.session_state.get("download_ready")),
+        download_ready=download_ready_flag,
+        convert_label=convert_label,
+        can_convert=can_convert,
+        has_batch=bool(preview_files or has_results),
+        convert_muted=convert_muted,
+        settings_dirty=settings_dirty,
     )
 
+render_config_tape(
+    build_config_tape_line(
+        quality_mode=quality_mode,
+        quality=quality,
+        resize_pct=resize_pct,
+        target_kb=target_kb,
+        encode_options=encode_options,
+        settings_dirty=settings_dirty,
+    ),
+    dirty=settings_dirty,
+)
+
+render_drop_bay_header(compact=bool(preview_files), file_count=len(preview_files))
 new_uploads = st.file_uploader(
     "Upload images or ZIP",
     type=None,
@@ -3182,13 +3386,15 @@ new_uploads = st.file_uploader(
     label_visibility="collapsed",
     key=f"uploader_{st.session_state.uploader_key}",
 )
-st.markdown(
-    '<p class="upload-hint">Images or ZIP · folder paths preserved · up to 100 files</p>',
-    unsafe_allow_html=True,
-)
+if not preview_files:
+    st.markdown(
+        '<p class="upload-hint">Drag images or a ZIP · folder paths preserved · up to 100 files</p>',
+        unsafe_allow_html=True,
+    )
 
+duplicate_count = 0
 if new_uploads:
-    changed, duplicates = merge_new_uploads(new_uploads)
+    changed, duplicate_count = merge_new_uploads(new_uploads)
     if changed:
         st.session_state.uploader_key += 1
         st.session_state.pop("results", None)
@@ -3196,36 +3402,54 @@ if new_uploads:
         st.session_state.results_by_id = {}
         st.session_state.download_ready = False
         st.rerun()
-    if duplicates:
-        st.toast(f"Skipped {duplicates} duplicate file{'s' if duplicates != 1 else ''}", icon="⚠️")
 
+advisories: list[tuple[str, str]] = []
+if len(preview_files) > MAX_FILES:
+    advisories.append((f"Too many files — maximum is {MAX_FILES}", "fail"))
+if duplicate_count:
+    advisories.append(
+        (
+            f"Skipped {duplicate_count} duplicate file{'s' if duplicate_count != 1 else ''}",
+            "warn",
+        )
+    )
 if unsupported_files and supported_previews:
     names = ", ".join(p.name for p in unsupported_files[:3])
     extra = f" (+{len(unsupported_files) - 3})" if len(unsupported_files) > 3 else ""
-    st.markdown(f'<div class="advisory">{len(unsupported_files)} unsupported skipped: {html.escape(names)}{extra}</div>', unsafe_allow_html=True)
+    advisories.append((f"{len(unsupported_files)} unsupported skipped: {names}{extra}", "warn"))
 elif unsupported_files:
-    st.markdown('<div class="advisory advisory-fail">No supported images in upload.</div>', unsafe_allow_html=True)
+    advisories.append(("No supported images in upload.", "fail"))
+render_advisory_strip(advisories)
 
-can_convert = bool(supported_previews) and len(preview_files) <= MAX_FILES
-settings_dirty = settings_changed(quality, resize_pct, target_kb, quality_mode, encode_options)
-convert_label = "RE-CONVERT" if has_results and settings_dirty else "CONVERT"
-armed = can_convert and not has_results
-st.session_state["convert_armed"] = armed
-download_ready_flag = bool(st.session_state.get("download_ready"))
-convert_muted = bool(has_results and can_download and download_ready_flag)
+with telemetry_slot.container():
+    if has_results and included_results:
+        total_original = sum(r.original_bytes for r in included_results)
+        total_output = sum(zip_output_bytes(r) for r in included_results)
+        savings = (1 - total_output / total_original) * 100 if total_original > 0 else 0
+        successful_count = sum(1 for r in st.session_state.results_by_id.values() if r.success)
+        render_main_telemetry(
+            mode="results",
+            original_bytes=total_original,
+            output_bytes=total_output,
+            savings_pct=savings,
+            total_files=len(included_results),
+            detail=f"Converted {successful_count}/{len(st.session_state.results_by_id)}",
+        )
+    elif estimate and preview_files and not has_results:
+        render_main_telemetry(
+            mode="estimate",
+            original_bytes=estimate.original_bytes,
+            output_bytes=estimate.estimated_webp_bytes,
+            savings_pct=estimate.savings_pct,
+            total_files=estimate.total_files,
+        )
 
-convert_clicked = render_control_bar(
-    convert_label=convert_label,
-    can_convert=can_convert,
-    has_batch=bool(preview_files or has_results),
-    has_results=has_results,
-    can_download=can_download,
-    download_ready=download_ready_flag,
-    convert_muted=convert_muted,
-    settings_dirty=settings_dirty,
-)
-
-grid_slot = st.empty()
+if download_ready_flag and can_download and included_results:
+    total_output = sum(zip_output_bytes(r) for r in included_results)
+    render_download_ready_banner(
+        file_count=len(included_results),
+        output_size=format_bytes(total_output),
+    )
 
 if convert_clicked and can_convert:
     run_conversion(
@@ -3237,12 +3461,20 @@ if convert_clicked and can_convert:
         quality_mode,
         encode_options,
         grid_placeholder=grid_slot,
-        stepper_placeholder=stepper_slot,
+        procedure_placeholder=procedure_slot,
+        telemetry_placeholder=telemetry_slot,
         can_download=can_download,
+        convert_label=convert_label,
+        can_convert=can_convert,
+        has_batch=bool(preview_files or has_results),
+        convert_muted=convert_muted,
+        settings_dirty=settings_dirty,
     )
 
 if preview_files and not (convert_clicked and can_convert):
     with grid_slot.container():
+        if st.session_state.get("grid_density") == "dense":
+            st.markdown('<div class="grid-density-dense-anchor"></div>', unsafe_allow_html=True)
         render_grid_block(
             preview_files,
             st.session_state.grid_page,
@@ -3253,7 +3485,7 @@ if preview_files and not (convert_clicked and can_convert):
             target_kb=target_kb,
             has_results=has_results,
         )
-elif not new_uploads:
+elif not preview_files:
     with grid_slot.container():
         st.markdown('<div class="grid-panel-anchor"></div>', unsafe_allow_html=True)
         render_empty_state()
@@ -3261,7 +3493,7 @@ elif not new_uploads:
 if st.session_state.get("convert_armed"):
     render_convert_blink_css(True)
 
-if st.session_state.get("download_ready") and can_download:
+if download_ready_flag and can_download:
     render_download_ready_css()
 
 if st.session_state.get("mp4_dialog_open"):
