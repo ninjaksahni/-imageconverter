@@ -55,3 +55,24 @@ def test_convert_image_jpeg_only() -> None:
     with Image.open(io.BytesIO(result.jpeg_data)) as image:
         assert image.format == "JPEG"
         assert image.size == (200, 100)
+
+
+def test_convert_image_multi_format_bundle() -> None:
+    data = _rgb_image(120, 80)
+    result = convert_image(
+        data,
+        "photo.jpg",
+        quality=80,
+        encode_options=EncodeOptions(
+            output_webp=True,
+            output_avif=False,
+            output_png=True,
+            output_jpeg=True,
+        ),
+    )
+
+    assert result.success
+    assert result.webp_data
+    assert result.png_data
+    assert result.jpeg_data
+    assert not result.avif_data

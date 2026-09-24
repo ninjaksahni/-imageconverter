@@ -21,11 +21,6 @@ from converter import (
     DEFAULT_QUALITY,
     BatchEstimate,
     ConversionResult,
-    OUTPUT_FORMAT_AVIF,
-    OUTPUT_FORMAT_BOTH,
-    OUTPUT_FORMAT_JPEG,
-    OUTPUT_FORMAT_PNG,
-    OUTPUT_FORMAT_WEBP,
     EncodeOptions,
     FileEstimate,
     _run_convert_job,
@@ -72,6 +67,7 @@ from theme.airbus import (
 from video_compressor import (
     QUALITY_PRESETS,
     VideoProbe,
+    build_mp4_zip,
     check_ffmpeg_available,
     cleanup_video_temp_dir,
     compress_video,
@@ -85,6 +81,7 @@ from video_compressor import (
 )
 
 MAX_FILES = 100
+MAX_MP4_BATCH = 5
 MP4_COMPARE_MAX_BYTES = 80 * 1024 * 1024
 CARDS_PER_ROW = 4
 CARDS_PER_PAGE = 20
@@ -100,15 +97,6 @@ GRID_FILTERS: dict[str, str] = {
 }
 
 SMALL_BATCH_THRESHOLD = 8
-
-OUTPUT_FORMAT_CHOICES = ["WebP only", "AVIF only", "AVIF Plus", "PNG only", "JPEG only"]
-OUTPUT_FORMAT_MAP = {
-    "WebP only": OUTPUT_FORMAT_WEBP,
-    "AVIF only": OUTPUT_FORMAT_AVIF,
-    "AVIF Plus": OUTPUT_FORMAT_BOTH,
-    "PNG only": OUTPUT_FORMAT_PNG,
-    "JPEG only": OUTPUT_FORMAT_JPEG,
-}
 
 COMPRESSION_PRESETS: dict[str, dict] = {
     "Max quality": {"mode": "Fixed quality", "quality": 95, "resize": 100, "target_kb": 200},
@@ -160,15 +148,15 @@ def init_batch_state() -> None:
         "grid_view_mode": "list",
         "sq_lossless": False,
         "sq_strip_metadata": False,
-        "sq_output_format": "WebP only",
+        "sq_out_webp": True,
+        "sq_out_avif": False,
+        "sq_out_png": False,
+        "sq_out_jpeg": False,
         "sq_avif_target_pct": 50,
         "mp4_temp_dir": None,
-        "mp4_input_path": None,
-        "mp4_output_path": None,
-        "mp4_upload_name": None,
-        "mp4_last_upload_id": None,
-        "mp4_compress_elapsed": None,
-        "mp4_result_warnings": [],
+        "mp4_items": {},
+        "mp4_selected_id": None,
+        "mp4_last_upload_sig": None,
         "mp4_dialog_open": False,
         "mp4_uploader_key": 0,
         "mp4_show_compare": False,
@@ -178,19 +166,36 @@ def init_batch_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-    if st.session_state.get("sq_output_format") == "WebP + AVIF":
-        st.session_state.sq_output_format = "AVIF Plus"
+    _migrate_legacy_output_format()
+
+
+def _migrate_legacy_output_format() -> None:
+    if "sq_out_webp" in st.session_state and any(
+        key in st.session_state for key in ("sq_out_avif", "sq_out_png", "sq_out_jpeg")
+    ):
+        return
+    label = st.session_state.pop("sq_output_format", "WebP only")
+    legacy = {
+        "WebP only": (True, False, False, False),
+        "AVIF only": (False, True, False, False),
+        "AVIF Plus": (True, True, False, False),
+        "WebP + AVIF": (True, True, False, False),
+        "PNG only": (False, False, True, False),
+        "JPEG only": (False, False, False, True),
+    }
+    webp, avif, png, jpeg = legacy.get(label, (True, False, False, False))
+    st.session_state.sq_out_webp = webp
+    st.session_state.sq_out_avif = avif
+    st.session_state.sq_out_png = png
+    st.session_state.sq_out_jpeg = jpeg
 
 
 def clear_mp4_state() -> None:
     cleanup_video_temp_dir(st.session_state.get("mp4_temp_dir"))
     st.session_state.mp4_temp_dir = None
-    st.session_state.mp4_input_path = None
-    st.session_state.mp4_output_path = None
-    st.session_state.mp4_upload_name = None
-    st.session_state.mp4_last_upload_id = None
-    st.session_state.mp4_compress_elapsed = None
-    st.session_state.mp4_result_warnings = []
+    st.session_state.mp4_items = {}
+    st.session_state.mp4_selected_id = None
+    st.session_state.mp4_last_upload_sig = None
     st.session_state.mp4_show_compare = False
 
 
@@ -198,10 +203,19 @@ def clear_active_preset() -> None:
     st.session_state.active_preset = None
 
 
-def on_output_format_change() -> None:
+def get_output_format_flags() -> tuple[bool, bool, bool, bool]:
+    return (
+        bool(st.session_state.get("sq_out_webp", True)),
+        bool(st.session_state.get("sq_out_avif", False)),
+        bool(st.session_state.get("sq_out_png", False)),
+        bool(st.session_state.get("sq_out_jpeg", False)),
+    )
+
+
+def on_output_formats_change() -> None:
     clear_active_preset()
-    if st.session_state.get("sq_output_format") == "AVIF Plus":
-        st.session_state.sq_avif_target_pct = 50
+    if not any(get_output_format_flags()):
+        st.session_state.sq_out_webp = True
 
 
 def render_avif_format_hint(output_format: str) -> None:
@@ -249,16 +263,15 @@ def add_file_to_batch(relative_path: str, data: bytes) -> bool:
     return True
 
 
-def get_output_format_key() -> str:
-    label = st.session_state.get("sq_output_format", "WebP only")
-    return OUTPUT_FORMAT_MAP.get(label, OUTPUT_FORMAT_WEBP)
-
-
 def get_encode_options() -> EncodeOptions:
-    return EncodeOptions.from_output_format(
-        get_output_format_key(),
+    webp, avif, png, jpeg = get_output_format_flags()
+    return EncodeOptions(
         lossless=bool(st.session_state.get("sq_lossless")),
         strip_metadata=bool(st.session_state.get("sq_strip_metadata")),
+        output_webp=webp,
+        output_avif=avif,
+        output_png=png,
+        output_jpeg=jpeg,
         avif_target_webp_pct=int(st.session_state.get("sq_avif_target_pct", 50)),
     )
 
@@ -375,17 +388,25 @@ def store_edit_conversion_result(
         "quality_mode": quality_mode,
         "lossless": encode_options.lossless,
         "strip_metadata": encode_options.strip_metadata,
-        "output_format": get_output_format_key(),
+        "output_formats": get_output_format_flags(),
         "avif_target_webp_pct": encode_options.avif_target_webp_pct,
     }
     if result.success:
         st.session_state.download_ready = True
 
 
+def count_result_outputs(result: ConversionResult) -> int:
+    return sum(
+        1
+        for data in (result.webp_data, result.avif_data, result.png_data, result.jpeg_data)
+        if data
+    )
+
+
 def single_result_download_payload(result: ConversionResult) -> tuple[bytes, str, str]:
     if not result.success:
         return b"", "output.bin", "application/octet-stream"
-    if result.webp_data and result.avif_data:
+    if count_result_outputs(result) > 1:
         stem = PurePosixPath(result.relative_path).stem
         return (
             build_zip([result], excluded_ids=set()),
@@ -418,19 +439,7 @@ def single_result_download_payload(result: ConversionResult) -> tuple[bytes, str
 
 
 def format_edit_output_size_label(result: ConversionResult) -> str:
-    if not result.success:
-        return "—"
-    if result.webp_bytes > 0 and result.avif_bytes > 0:
-        return f"{format_bytes(result.webp_bytes)} webp · {format_bytes(result.avif_bytes)} avif"
-    if result.avif_bytes > 0:
-        return format_bytes(result.avif_bytes)
-    if result.webp_bytes > 0:
-        return format_bytes(result.webp_bytes)
-    if result.png_bytes > 0:
-        return format_bytes(result.png_bytes)
-    if result.jpeg_bytes > 0:
-        return format_bytes(result.jpeg_bytes)
-    return "—"
+    return result_output_size_label(result) if result.success else "—"
 
 
 @st.cache_data(show_spinner=False)
@@ -468,6 +477,8 @@ def cached_edit_convert_download(
         strip_metadata,
         output_webp,
         output_avif,
+        output_png,
+        output_jpeg,
         avif_target_pct,
     ) = settings_key
     encode_options = EncodeOptions(
@@ -475,6 +486,8 @@ def cached_edit_convert_download(
         strip_metadata=strip_metadata,
         output_webp=output_webp,
         output_avif=output_avif,
+        output_png=output_png,
+        output_jpeg=output_jpeg,
         avif_target_webp_pct=avif_target_pct,
     )
     edit_params = ImageEditParams(
@@ -591,72 +604,49 @@ def render_result_downloads(
     key_prefix: str,
     page: int,
 ) -> None:
-    has_webp = bool(result.webp_data)
-    has_avif = bool(result.avif_data)
-    has_png = bool(result.png_data)
-    has_jpeg = bool(result.jpeg_data)
-    if has_webp and has_avif:
-        w_col, a_col = st.columns(2)
-        with w_col:
+    downloads: list[tuple[str, bytes, str, str, str]] = []
+    if result.webp_data:
+        downloads.append(
+            ("W", result.webp_data, result.webp_name, "image/webp", "Download WebP")
+        )
+    if result.avif_data:
+        downloads.append(
+            ("A", result.avif_data, result.avif_name, "image/avif", "Download AVIF")
+        )
+    if result.png_data:
+        downloads.append(
+            ("P", result.png_data, result.png_name, "image/png", "Download PNG")
+        )
+    if result.jpeg_data:
+        downloads.append(
+            ("J", result.jpeg_data, result.jpeg_name, "image/jpeg", "Download JPEG")
+        )
+    if not downloads:
+        return
+    if len(downloads) == 1:
+        label, data, name, mime, help_text = downloads[0]
+        st.download_button(
+            "↓",
+            data=data,
+            file_name=basename_from_relative(name),
+            mime=mime,
+            key=f"{key_prefix}_{result.file_id}_{page}",
+            help=help_text,
+            use_container_width=True,
+        )
+        return
+    cols = st.columns(len(downloads))
+    for col, (label, data, name, mime, help_text) in zip(cols, downloads):
+        with col:
             st.download_button(
-                "W",
-                data=result.webp_data,
-                file_name=basename_from_relative(result.webp_name),
-                mime="image/webp",
-                key=f"{key_prefix}_w_{result.file_id}_{page}",
-                help="Download WebP",
+                label,
+                data=data,
+                file_name=basename_from_relative(name),
+                mime=mime,
+                key=f"{key_prefix}_{label}_{result.file_id}_{page}",
+                help=help_text,
                 use_container_width=True,
             )
-        with a_col:
-            st.download_button(
-                "A",
-                data=result.avif_data,
-                file_name=basename_from_relative(result.avif_name),
-                mime="image/avif",
-                key=f"{key_prefix}_a_{result.file_id}_{page}",
-                help="Download AVIF",
-                use_container_width=True,
-            )
-    elif has_avif:
-        st.download_button(
-            "↓",
-            data=result.avif_data,
-            file_name=basename_from_relative(result.avif_name),
-            mime="image/avif",
-            key=f"{key_prefix}_{result.file_id}_{page}",
-            help="Download AVIF",
-            use_container_width=True,
-        )
-    elif has_png:
-        st.download_button(
-            "↓",
-            data=result.png_data,
-            file_name=basename_from_relative(result.png_name),
-            mime="image/png",
-            key=f"{key_prefix}_{result.file_id}_{page}",
-            help="Download PNG",
-            use_container_width=True,
-        )
-    elif has_jpeg:
-        st.download_button(
-            "↓",
-            data=result.jpeg_data,
-            file_name=basename_from_relative(result.jpeg_name),
-            mime="image/jpeg",
-            key=f"{key_prefix}_{result.file_id}_{page}",
-            help="Download JPEG",
-            use_container_width=True,
-        )
-    else:
-        st.download_button(
-            "↓",
-            data=result.webp_data,
-            file_name=basename_from_relative(result.webp_name),
-            mime="image/webp",
-            key=f"{key_prefix}_{result.file_id}_{page}",
-            help="Download WebP",
-            use_container_width=True,
-        )
 
 
 def merge_new_uploads(uploaded: list) -> tuple[bool, int]:
@@ -787,13 +777,18 @@ def clear_all_files() -> None:
 
 
 def zip_download_name() -> str:
-    prefix = {
-        OUTPUT_FORMAT_WEBP: "webp",
-        OUTPUT_FORMAT_AVIF: "avif",
-        OUTPUT_FORMAT_BOTH: "images",
-        OUTPUT_FORMAT_PNG: "png",
-        OUTPUT_FORMAT_JPEG: "jpeg",
-    }.get(get_output_format_key(), "images")
+    webp, avif, png, jpeg = get_output_format_flags()
+    flags = (webp, avif, png, jpeg)
+    if flags == (True, False, False, False):
+        prefix = "webp"
+    elif flags == (False, True, False, False):
+        prefix = "avif"
+    elif flags == (False, False, True, False):
+        prefix = "png"
+    elif flags == (False, False, False, True):
+        prefix = "jpeg"
+    else:
+        prefix = "images"
     return f"{prefix}_{datetime.now().strftime('%Y-%m-%d_%H%M')}.zip"
 
 
@@ -1026,6 +1021,8 @@ def cached_batch_estimate(
         strip_metadata,
         output_webp,
         output_avif,
+        output_png,
+        output_jpeg,
         edit_keys,
     ) = settings_key
     target_bytes = target_kb * 1024 if target_kb else None
@@ -1034,6 +1031,8 @@ def cached_batch_estimate(
         strip_metadata=strip_metadata,
         output_webp=output_webp,
         output_avif=output_avif,
+        output_png=output_png,
+        output_jpeg=output_jpeg,
     )
     edits = []
     for edit_key in edit_keys:
@@ -1113,6 +1112,8 @@ def load_estimates(
             encode_options.strip_metadata,
             encode_options.output_webp,
             encode_options.output_avif,
+            encode_options.output_png,
+            encode_options.output_jpeg,
             tuple(thumbnail_edit_key(file_id) for file_id in file_ids),
         ),
         tuple(file_data),
@@ -1534,11 +1535,9 @@ def render_mp4_sync_compare_view(
     )
 
 
-def render_mp4_inline_compare() -> None:
-    """Side-by-side compare panel rendered inside the compress dialog."""
-    output_path = st.session_state.get("mp4_output_path")
-    input_path = st.session_state.get("mp4_input_path")
-    if not output_path or not input_path:
+def render_mp4_inline_compare(input_path: str | None, output_path: str | None) -> None:
+    """Lightweight side-by-side preview using file paths (avoids loading full videos into memory)."""
+    if not input_path or not output_path:
         st.markdown(
             '<div class="mp4-compare-placeholder">Compare appears here after compression.</div>',
             unsafe_allow_html=True,
@@ -1559,32 +1558,103 @@ def render_mp4_inline_compare() -> None:
         )
         return
 
-    original_bytes = original.stat().st_size
-    output_bytes = compressed.stat().st_size
-    total_bytes = original_bytes + output_bytes
-    element_id = re.sub(r"[^a-zA-Z0-9_-]", "", f"mp4cmp-{st.session_state.mp4_last_upload_id or 'vid'}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown('<div class="compare-title">Original</div>', unsafe_allow_html=True)
+        st.video(str(original))
+        st.caption(format_bytes(original.stat().st_size))
+    with col2:
+        st.markdown('<div class="compare-title">Compressed</div>', unsafe_allow_html=True)
+        st.video(str(compressed))
+        st.caption(format_bytes(compressed.stat().st_size))
 
-    if total_bytes <= MP4_COMPARE_MAX_BYTES:
-        render_mp4_sync_compare_view(
-            original,
-            compressed,
-            orig_label=format_bytes(original_bytes),
-            compressed_label=format_bytes(output_bytes),
-            element_id=element_id,
-            height=340,
-        )
-    else:
-        st.markdown(
-            '<p class="upload-hint">Large files — unsynced preview.</p>',
-            unsafe_allow_html=True,
-        )
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown('<div class="compare-title">Original</div>', unsafe_allow_html=True)
-            st.video(original.read_bytes())
-        with col2:
-            st.markdown('<div class="compare-title">Compressed</div>', unsafe_allow_html=True)
-            st.video(compressed.read_bytes())
+
+def _mp4_item_id(name: str, size: int) -> str:
+    return hashlib.md5(f"{name}:{size}".encode()).hexdigest()
+
+
+def _ensure_mp4_temp_dir() -> Path:
+    existing = st.session_state.get("mp4_temp_dir")
+    if existing:
+        return Path(existing)
+    temp_dir = create_video_temp_dir()
+    st.session_state.mp4_temp_dir = str(temp_dir)
+    return temp_dir
+
+
+def _mp4_items() -> dict[str, dict]:
+    return st.session_state.get("mp4_items") or {}
+
+
+def _selected_mp4_item() -> dict | None:
+    item_id = st.session_state.get("mp4_selected_id")
+    if not item_id:
+        return None
+    return _mp4_items().get(item_id)
+
+
+def _mp4_upload_signature(uploaded_list: list) -> str:
+    return "|".join(sorted(f"{item.name}:{item.size}" for item in uploaded_list))
+
+
+def _ingest_mp4_uploads(uploaded_list: list) -> str | None:
+    if not uploaded_list:
+        return None
+    items = dict(_mp4_items())
+    temp_dir = _ensure_mp4_temp_dir()
+    messages: list[str] = []
+    for uploaded in uploaded_list:
+        if len(items) >= MAX_MP4_BATCH:
+            messages.append(f"Maximum {MAX_MP4_BATCH} videos per batch.")
+            break
+        item_id = _mp4_item_id(uploaded.name, uploaded.size)
+        if item_id in items:
+            continue
+        try:
+            stem = Path(uploaded.name).stem or "video"
+            input_path = temp_dir / f"{stem}_{item_id[:8]}.mp4"
+            input_path.write_bytes(uploaded.getvalue())
+            probe_video(input_path)
+        except (OSError, RuntimeError) as exc:
+            messages.append(f"{uploaded.name}: {exc}")
+            continue
+        items[item_id] = {
+            "id": item_id,
+            "name": uploaded.name,
+            "input_path": str(input_path),
+            "output_path": None,
+            "status": "ready",
+            "error": None,
+            "warnings": [],
+            "elapsed_s": 0.0,
+        }
+    st.session_state.mp4_items = items
+    if items and not st.session_state.get("mp4_selected_id"):
+        st.session_state.mp4_selected_id = next(iter(items))
+    return "; ".join(messages) if messages else None
+
+
+def _remove_mp4_item(item_id: str) -> None:
+    items = dict(_mp4_items())
+    item = items.pop(item_id, None)
+    if not item:
+        return
+    for path_key in ("input_path", "output_path"):
+        path = item.get(path_key)
+        if path:
+            Path(path).unlink(missing_ok=True)
+    st.session_state.mp4_items = items
+    if st.session_state.get("mp4_selected_id") == item_id:
+        st.session_state.mp4_selected_id = next(iter(items), None)
+
+
+def _mp4_status_label(status: str) -> str:
+    return {
+        "ready": "Ready",
+        "done": "Done",
+        "failed": "Failed",
+        "compressing": "Working",
+    }.get(status, status.title())
 
 
 def _mp4_max_height_label(max_height: int | None) -> str:
@@ -1595,8 +1665,7 @@ def _mp4_max_height_label(max_height: int | None) -> str:
     return "Original"
 
 
-def _load_mp4_probe() -> VideoProbe | None:
-    input_path = st.session_state.get("mp4_input_path")
+def _load_mp4_probe_for_path(input_path: str | None) -> VideoProbe | None:
     if not input_path:
         return None
     try:
@@ -1607,6 +1676,24 @@ def _load_mp4_probe() -> VideoProbe | None:
 
 def _dismiss_mp4_dialog() -> None:
     st.session_state.mp4_dialog_open = False
+
+
+def _compress_mp4_item(item: dict, options) -> None:
+    temp_dir = Path(st.session_state.mp4_temp_dir)
+    stem = Path(item["name"]).stem or "video"
+    output_path = temp_dir / f"{stem}_{item['id'][:8]}_compressed.mp4"
+    probe = probe_video(item["input_path"])
+    result = compress_video(item["input_path"], output_path, probe, options)
+    if result.success:
+        item["output_path"] = result.output_path
+        item["status"] = "done"
+        item["warnings"] = result.warnings
+        item["elapsed_s"] = result.elapsed_s
+        item["error"] = None
+    else:
+        item["status"] = "failed"
+        item["error"] = result.error or "Compression failed."
+        item["warnings"] = result.warnings
 
 
 @st.dialog("Compress MP4", width="large", on_dismiss=_dismiss_mp4_dialog)
@@ -1625,41 +1712,59 @@ def show_mp4_compress_dialog() -> None:
         return
 
     st.markdown(
-        '<p class="upload-hint">Upload one MP4 file. Output uses H.264 + web-optimized MP4 (+faststart).</p>',
+        f'<p class="upload-hint">Upload up to {MAX_MP4_BATCH} MP4 files. '
+        "Output uses H.264 + web-optimized MP4 (+faststart). Files are processed one at a time.</p>",
         unsafe_allow_html=True,
     )
 
     uploaded = st.file_uploader(
         "Upload MP4",
         type=["mp4"],
-        accept_multiple_files=False,
+        accept_multiple_files=True,
         key=f"mp4_dialog_uploader_{st.session_state.mp4_uploader_key}",
     )
 
-    if uploaded is not None:
-        upload_id = f"{uploaded.name}:{uploaded.size}"
-        if st.session_state.get("mp4_last_upload_id") != upload_id:
-            clear_mp4_state()
-            temp_dir = create_video_temp_dir()
-            st.session_state.mp4_temp_dir = str(temp_dir)
-            try:
-                input_path = save_upload_to_temp(temp_dir, uploaded.name, uploaded.getvalue())
-                probe_video(input_path)
-            except (OSError, RuntimeError) as exc:
-                cleanup_video_temp_dir(temp_dir)
-                st.session_state.mp4_temp_dir = None
-                st.error(f"Could not read video: {exc}")
-                return
-            st.session_state.mp4_input_path = str(input_path)
-            st.session_state.mp4_upload_name = uploaded.name
-            st.session_state.mp4_output_path = None
-            st.session_state.mp4_last_upload_id = upload_id
-            st.session_state.mp4_compress_elapsed = None
-            st.session_state.mp4_result_warnings = []
-            st.session_state.mp4_show_compare = False
+    if uploaded:
+        upload_sig = _mp4_upload_signature(uploaded)
+        if st.session_state.get("mp4_last_upload_sig") != upload_sig:
+            ingest_error = _ingest_mp4_uploads(uploaded)
+            st.session_state.mp4_last_upload_sig = upload_sig
+            if ingest_error:
+                st.warning(ingest_error)
 
-    probe = _load_mp4_probe()
+    items = _mp4_items()
+    if not items:
+        return
+
+    item_list = list(items.values())
+    selected_id = st.session_state.get("mp4_selected_id")
+    if selected_id not in items:
+        selected_id = item_list[0]["id"]
+        st.session_state.mp4_selected_id = selected_id
+    selected = items[selected_id]
+
+    st.markdown('<div class="mp4-compare-heading">Batch queue</div>', unsafe_allow_html=True)
+    for item in item_list:
+        row_l, row_m, row_r = st.columns([4, 1.2, 0.8])
+        with row_l:
+            label = f"{'• ' if item['id'] == selected_id else ''}{item['name']}"
+            if st.button(label, key=f"mp4_pick_{item['id']}", use_container_width=True):
+                st.session_state.mp4_selected_id = item["id"]
+                st.session_state.mp4_show_compare = False
+                st.rerun()
+        with row_m:
+            st.markdown(
+                f'<div class="upload-hint">{_mp4_status_label(item["status"])}</div>',
+                unsafe_allow_html=True,
+            )
+        with row_r:
+            if st.button("✕", key=f"mp4_remove_{item['id']}", help="Remove from batch"):
+                _remove_mp4_item(item["id"])
+                st.rerun()
+
+    probe = _load_mp4_probe_for_path(selected["input_path"])
     if probe is None:
+        st.error("Could not read the selected video.")
         return
 
     render_video_probe_panel(
@@ -1671,8 +1776,8 @@ def show_mp4_compress_dialog() -> None:
         audio_bitrate=format_bitrate(probe.audio_bitrate) if probe.has_audio else "No audio",
     )
 
-    output_path = st.session_state.get("mp4_output_path")
-    has_output = bool(output_path and Path(output_path).exists())
+    selected_output = selected.get("output_path")
+    has_output = bool(selected_output and Path(selected_output).exists())
 
     settings_col, compare_col = st.columns([1, 1.15], gap="medium")
     with settings_col:
@@ -1740,11 +1845,11 @@ def show_mp4_compress_dialog() -> None:
             if st.button(
                 compare_label,
                 key="mp4_compare_toggle",
-                help="Toggle side-by-side preview",
+                help="Toggle side-by-side preview for the selected file",
                 use_container_width=True,
             ):
                 st.session_state.mp4_show_compare = not st.session_state.get("mp4_show_compare", False)
-        render_mp4_inline_compare()
+        render_mp4_inline_compare(selected["input_path"], selected_output)
 
     close_col, reset_col, compress_col = st.columns(3)
     with close_col:
@@ -1752,79 +1857,92 @@ def show_mp4_compress_dialog() -> None:
             st.session_state.mp4_dialog_open = False
             st.rerun()
     with reset_col:
-        if st.button("NEW FILE", key="mp4_reset", use_container_width=True):
+        if st.button("CLEAR ALL", key="mp4_reset", use_container_width=True):
             clear_mp4_state()
             st.session_state.mp4_uploader_key += 1
             st.session_state.mp4_dialog_open = True
             st.rerun()
     with compress_col:
-        compress_clicked = st.button("COMPRESS", type="primary", key="mp4_compress", use_container_width=True)
+        pending = [item for item in item_list if item["status"] in {"ready", "failed"}]
+        compress_clicked = st.button(
+            f"COMPRESS ALL ({len(pending)})" if len(item_list) > 1 else "COMPRESS",
+            type="primary",
+            key="mp4_compress",
+            use_container_width=True,
+            disabled=not pending,
+        )
 
-    if compress_clicked:
-        temp_dir = Path(st.session_state.mp4_temp_dir)
-        stem = Path(st.session_state.mp4_upload_name or "video.mp4").stem
-        output_path = temp_dir / f"{stem}_compressed.mp4"
+    if compress_clicked and pending:
         progress = st.progress(0.0)
         status = st.empty()
-
-        def on_progress(ratio: float) -> None:
-            progress.progress(min(1.0, max(0.0, ratio)))
-            status.caption(f"Encoding… {int(ratio * 100)}%")
-
-        result = compress_video(
-            st.session_state.mp4_input_path,
-            output_path,
-            probe,
-            options,
-            on_progress=on_progress,
-        )
+        for index, item in enumerate(pending, start=1):
+            item_probe = probe_video(item["input_path"])
+            item_options = options_from_preset(
+                preset,
+                item_probe,
+                max_height=max_height,
+                remove_audio=remove_audio if item_probe.has_audio else True,
+            )
+            status.caption(f"Encoding {index} of {len(pending)}: {item['name']}")
+            progress.progress((index - 1) / len(pending))
+            _compress_mp4_item(item, item_options)
+            items[item["id"]] = item
+        st.session_state.mp4_items = items
+        progress.progress(1.0)
         progress.empty()
         status.empty()
+        st.session_state.mp4_selected_id = pending[-1]["id"]
+        st.session_state.mp4_show_compare = True
+        st.session_state.mp4_dialog_open = True
+        st.rerun()
 
-        if not result.success:
-            st.error(result.error or "Compression failed.")
-        else:
-            st.session_state.mp4_output_path = result.output_path
-            st.session_state.mp4_compress_elapsed = result.elapsed_s
-            st.session_state.mp4_result_warnings = result.warnings
-            st.session_state.mp4_show_compare = True
-            st.session_state.mp4_dialog_open = True
-            st.rerun()
+    done_items = [item for item in item_list if item.get("output_path") and Path(item["output_path"]).exists()]
+    if done_items:
+        st.markdown('<div class="mp4-compare-heading">Results</div>', unsafe_allow_html=True)
+        for item in done_items:
+            output_path = Path(item["output_path"])
+            input_probe = probe_video(item["input_path"])
+            output_probe = probe_video(output_path)
+            original_bytes = input_probe.file_size
+            output_bytes = output_path.stat().st_size
+            saved_bytes = max(0, original_bytes - output_bytes)
+            savings = (saved_bytes / original_bytes * 100) if original_bytes > 0 else 0.0
+            st.markdown(f"**{html.escape(item['name'])}**")
+            for warning in item.get("warnings") or []:
+                st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
+            render_video_results_panel(
+                original_size=format_bytes(original_bytes),
+                compressed_size=format_bytes(output_bytes),
+                saved_mb=f"{saved_bytes / (1024 * 1024):.2f} MB",
+                savings_pct=f"{savings:.1f}%",
+                output_resolution=output_probe.display_resolution,
+                output_codec="H.264",
+                elapsed=f"{float(item.get('elapsed_s') or 0.0):.1f}s",
+            )
+            download_name = f"{Path(item['name']).stem}_compressed.mp4"
+            st.download_button(
+                f"DOWNLOAD {truncate_name(item['name'], 24)}",
+                data=output_path.read_bytes(),
+                file_name=download_name,
+                mime="video/mp4",
+                key=f"mp4_download_{item['id']}",
+                help="Download compressed MP4",
+                use_container_width=True,
+            )
 
-    output_path = st.session_state.get("mp4_output_path")
-    has_output = bool(output_path and Path(output_path).exists())
-    if has_output:
-        for warning in st.session_state.get("mp4_result_warnings") or []:
-            st.markdown(f'<div class="advisory">{html.escape(warning)}</div>', unsafe_allow_html=True)
-
-        output_probe = probe_video(output_path)
-        original_bytes = probe.file_size
-        output_bytes = Path(output_path).stat().st_size
-        saved_bytes = max(0, original_bytes - output_bytes)
-        savings = (saved_bytes / original_bytes * 100) if original_bytes > 0 else 0.0
-        elapsed_s = float(st.session_state.get("mp4_compress_elapsed") or 0.0)
-
-        render_video_results_panel(
-            original_size=format_bytes(original_bytes),
-            compressed_size=format_bytes(output_bytes),
-            saved_mb=f"{saved_bytes / (1024 * 1024):.2f} MB",
-            savings_pct=f"{savings:.1f}%",
-            output_resolution=output_probe.display_resolution,
-            output_codec="H.264",
-            elapsed=f"{elapsed_s:.1f}s",
-        )
-
-        download_name = f"{Path(st.session_state.mp4_upload_name or 'video.mp4').stem}_compressed.mp4"
-        st.markdown('<div class="mp4-download-anchor"></div>', unsafe_allow_html=True)
-        st.download_button(
-            "DOWNLOAD MP4",
-            data=Path(output_path).read_bytes(),
-            file_name=download_name,
-            mime="video/mp4",
-            key="mp4_download",
-            help="Download compressed MP4",
-            use_container_width=True,
-        )
+        if len(done_items) > 1:
+            zip_entries = [
+                (f"{Path(item['name']).stem}_compressed.mp4", Path(item["output_path"]))
+                for item in done_items
+            ]
+            st.download_button(
+                f"DOWNLOAD ZIP ({len(done_items)})",
+                data=build_mp4_zip(zip_entries),
+                file_name=f"mp4_{datetime.now().strftime('%Y-%m-%d_%H%M')}.zip",
+                mime="application/zip",
+                key="mp4_download_zip",
+                use_container_width=True,
+            )
 
 
 @st.dialog("Edit image", width="large")
@@ -1929,6 +2047,8 @@ def show_edit_dialog(file_id: str) -> None:
             encode_options.strip_metadata,
             encode_options.output_webp,
             encode_options.output_avif,
+            encode_options.output_png,
+            encode_options.output_jpeg,
             encode_options.avif_target_webp_pct,
         ),
         file_bytes,
@@ -2700,7 +2820,7 @@ def run_conversion(
         "quality_mode": quality_mode,
         "lossless": encode_options.lossless,
         "strip_metadata": encode_options.strip_metadata,
-        "output_format": get_output_format_key(),
+        "output_formats": get_output_format_flags(),
         "avif_target_webp_pct": encode_options.avif_target_webp_pct,
     }
     st.session_state.excluded_zip_ids = set()
@@ -2864,7 +2984,7 @@ def settings_changed(quality, resize_pct, target_kb, quality_mode, encode_option
         or settings.get("quality_mode") != quality_mode
         or settings.get("lossless") != encode_options.lossless
         or settings.get("strip_metadata") != encode_options.strip_metadata
-        or settings.get("output_format") != get_output_format_key()
+        or settings.get("output_formats") != get_output_format_flags()
         or settings.get("avif_target_webp_pct") != encode_options.avif_target_webp_pct
     )
 
@@ -2927,19 +3047,19 @@ with st.sidebar:
     resize_pct = st.slider(
         "Resize", 10, 100, format="%d%%", key="sq_resize", on_change=clear_active_preset
     )
-    st.markdown('<div class="ecam-field-label">Output</div>', unsafe_allow_html=True)
-    st.radio(
-        "Output format",
-        OUTPUT_FORMAT_CHOICES,
-        horizontal=True,
-        key="sq_output_format",
-        on_change=on_output_format_change,
-        help="WebP follows the quality slider. AVIF Plus tunes AVIF size relative to WebP.",
-    )
-    if st.session_state.sq_output_format == "AVIF only":
+    st.markdown('<div class="ecam-field-label">Output formats</div>', unsafe_allow_html=True)
+    out_a, out_b = st.columns(2)
+    with out_a:
+        st.checkbox("WebP", key="sq_out_webp", on_change=on_output_formats_change)
+        st.checkbox("PNG", key="sq_out_png", on_change=on_output_formats_change)
+    with out_b:
+        st.checkbox("AVIF", key="sq_out_avif", on_change=on_output_formats_change)
+        st.checkbox("JPEG", key="sq_out_jpeg", on_change=on_output_formats_change)
+    webp, avif, png, jpeg = get_output_format_flags()
+    if avif and not webp:
         st.markdown('<div class="quality-label">AVIF ENCODED AT Q70</div>', unsafe_allow_html=True)
         render_avif_format_hint("AVIF only")
-    if st.session_state.sq_output_format == "AVIF Plus":
+    if avif and webp:
         st.slider(
             "AVIF target",
             10,
@@ -2950,7 +3070,7 @@ with st.sidebar:
             help="Target AVIF file size as a percentage of the WebP output.",
         )
         render_avif_format_hint("AVIF Plus")
-    if st.session_state.sq_output_format == "PNG only":
+    if png:
         st.markdown(
             '<div class="mp4-auto-summary">'
             "<strong>PNG:</strong> Lossless output with transparency preserved. "
@@ -2958,7 +3078,7 @@ with st.sidebar:
             "</div>",
             unsafe_allow_html=True,
         )
-    if st.session_state.sq_output_format == "JPEG only":
+    if jpeg:
         st.markdown(
             '<div class="mp4-auto-summary">'
             "<strong>JPEG:</strong> Lossy output suited for photos and broad compatibility. "

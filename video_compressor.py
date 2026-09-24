@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 import time
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -652,6 +654,15 @@ def cleanup_video_temp_dir(path: Path | str | None) -> None:
     folder = Path(path)
     if folder.exists():
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def build_mp4_zip(entries: list[tuple[str, Path | str]]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for arcname, path in entries:
+            archive.write(Path(path), arcname=arcname.replace("\\", "/"))
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 def save_upload_to_temp(temp_dir: Path, filename: str, data: bytes) -> Path:
