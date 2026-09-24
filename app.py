@@ -2747,6 +2747,7 @@ def render_procedure_panel(
     has_batch: bool,
     convert_muted: bool = False,
     settings_dirty: bool = False,
+    show_controls: bool = True,
 ) -> bool:
     """Unified procedure panel: workflow stepper + action controls."""
     with st.container(border=True):
@@ -2759,6 +2760,8 @@ def render_procedure_panel(
             download_ready=download_ready,
             embedded=True,
         )
+        if not show_controls:
+            return False
         return render_procedure_controls(
             convert_label=convert_label,
             can_convert=can_convert,
@@ -2905,6 +2908,7 @@ def run_conversion(
                 has_batch=has_batch,
                 convert_muted=convert_muted,
                 settings_dirty=settings_dirty,
+                show_controls=False,
             )
         with telemetry_placeholder.container():
             render_converting_strip(completed=completed, total=len(jobs), eta_text=eta_text)
