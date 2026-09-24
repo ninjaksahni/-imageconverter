@@ -28,7 +28,7 @@ brew install ffmpeg
 sudo apt install ffmpeg
 ```
 
-System FFmpeg is preferred when available; otherwise the app downloads bundled binaries on first use.
+System FFmpeg is preferred when available; otherwise the app downloads bundled binaries on first use to a writable cache (`/tmp/imgconvert-static-ffmpeg` by default). On Streamlit Cloud, set `STATIC_FFMPEG_DIR` if you need a custom cache path.
 
 ## Local development
 

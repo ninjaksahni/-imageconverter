@@ -770,10 +770,31 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     font-size: 0.56rem !important; text-transform: uppercase !important;
     letter-spacing: 0.05em !important; color: {TEXT_MUTED} !important;
 }}
+@keyframes hmi-dl-glow-pulse {{
+    0%, 100% {{
+        color: {GREEN} !important;
+        border-color: {GREEN} !important;
+        box-shadow: 0 0 10px rgba(0, 200, 83, 0.35), inset 0 0 12px rgba(0, 200, 83, 0.1) !important;
+    }}
+    50% {{
+        color: {WHITE} !important;
+        border-color: {WHITE} !important;
+        box-shadow: 0 0 22px rgba(0, 200, 83, 0.65), inset 0 0 16px rgba(0, 200, 83, 0.16) !important;
+    }}
+}}
 [data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] > button,
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] button,
 [data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) button[data-testid="stBaseButton-primary"],
-[class*="st-key-main_zip_download"] button.hmi-convert-blink-active {{
-    animation: hmi-convert-blink 0.85s step-end infinite !important;
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) button[data-testid="stBaseButton-secondary"],
+[class*="st-key-main_zip_download"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] > button,
+[class*="st-key-main_zip_download"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] button {{
+    animation: hmi-dl-glow-pulse 1.1s ease-in-out infinite !important;
+}}
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] > button p,
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] > button span,
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] button p,
+[data-testid="column"]:has(.hmi-btn-dl-anchor.hmi-dl-ready) [data-testid="stDownloadButton"] button span {{
+    color: inherit !important;
 }}
 [data-testid="column"]:has(.hmi-bar-clear-anchor) [data-testid="stButton"] button {{
     font-family: 'IBM Plex Mono', monospace !important; font-weight: 600 !important;
@@ -1391,35 +1412,74 @@ def render_convert_blink_css(armed: bool) -> None:
     )
 
 
-def render_download_ready_css() -> None:
-    """Scroll to and pulse the ZIP download button after conversion."""
+def render_download_ready_glow(*, scroll_into_view: bool = False) -> None:
+    """Keep ZIP download button glowing until clicked; optionally scroll once."""
+    import json
     import streamlit.components.v1 as components
 
     components.html(
-        """
+        f"""
         <script>
-        (function () {
+        (function () {{
             const doc = window.parent.document;
+            const scrollIntoView = {json.dumps(scroll_into_view)};
 
-            function applyReady() {
-                const col = doc.querySelector('[data-testid="column"]:has(.hmi-btn-dl-anchor)');
-                const anchor = col && col.querySelector('.hmi-btn-dl-anchor');
-                if (anchor) anchor.classList.add('hmi-dl-ready');
-                const btn = col && col.querySelector('button[data-testid="stBaseButton-primary"]');
-                if (btn) {
-                    btn.classList.add('hmi-convert-blink-active');
-                    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            }
+            function findDownloadButton() {{
+                const anchor = doc.querySelector('.hmi-btn-dl-anchor.hmi-dl-ready');
+                if (!anchor) return null;
+                const col = anchor.closest('[data-testid="column"]');
+                if (!col) return null;
+                return col.querySelector('[data-testid="stDownloadButton"] button');
+            }}
+
+            function clearDownloadGlow() {{
+                doc.querySelectorAll('.hmi-btn-dl-anchor.hmi-dl-ready').forEach((anchor) => {{
+                    anchor.classList.remove('hmi-dl-ready');
+                }});
+                doc.querySelectorAll('[data-testid="stDownloadButton"] button.hmi-dl-glow-stopped').forEach((btn) => {{
+                    btn.classList.remove('hmi-dl-glow-stopped');
+                    btn.style.animation = '';
+                }});
+            }}
+
+            function bindDownloadStop(btn, anchor) {{
+                if (!btn || btn.dataset.dlGlowBound === '1') return;
+                btn.dataset.dlGlowBound = '1';
+                btn.addEventListener('click', () => {{
+                    anchor.classList.remove('hmi-dl-ready');
+                    btn.classList.add('hmi-dl-glow-stopped');
+                    btn.style.animation = 'none';
+                }}, {{ once: true }});
+            }}
+
+            function applyReady() {{
+                const anchor = doc.querySelector('.hmi-btn-dl-anchor.hmi-dl-ready');
+                if (!anchor) {{
+                    clearDownloadGlow();
+                    return;
+                }}
+                const btn = findDownloadButton();
+                if (!btn || btn.classList.contains('hmi-dl-glow-stopped')) return;
+                bindDownloadStop(btn, anchor);
+                if (scrollIntoView) {{
+                    btn.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                }}
+            }}
 
             applyReady();
-            setTimeout(applyReady, 100);
-            setTimeout(applyReady, 400);
-        })();
+            setTimeout(applyReady, 80);
+            setTimeout(applyReady, 300);
+            setTimeout(applyReady, 900);
+        }})();
         </script>
         """,
         height=0,
     )
+
+
+def render_download_ready_css() -> None:
+    """Backward-compatible alias for download glow helper."""
+    render_download_ready_glow(scroll_into_view=False)
 
 
 def render_converting_strip(*, completed: int, total: int, eta_text: str) -> None:

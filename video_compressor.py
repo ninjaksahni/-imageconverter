@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -14,6 +15,8 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 from typing import Callable
+
+from filelock import FileLock
 
 DEFAULT_PRESET = "medium"
 AUDIO_BITRATE = "96k"
@@ -123,6 +126,49 @@ _ffmpeg_exe: str | None = None
 _ffprobe_exe: str | None = None
 
 
+def _writable_static_ffmpeg_root() -> Path:
+    """Pick a writable cache directory (site-packages is read-only on Streamlit Cloud)."""
+    candidates: list[Path] = []
+    env_dir = os.environ.get("STATIC_FFMPEG_DIR", "").strip()
+    if env_dir:
+        candidates.append(Path(env_dir))
+    candidates.extend(
+        [
+            Path(tempfile.gettempdir()) / "imgconvert-static-ffmpeg",
+            Path.cwd() / ".cache" / "static-ffmpeg",
+            Path.home() / ".cache" / "imgconvert-static-ffmpeg",
+        ]
+    )
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return candidate
+        except OSError as exc:
+            last_error = exc
+            continue
+    detail = f" ({last_error})" if last_error else ""
+    raise RuntimeError(f"No writable directory available for FFmpeg cache.{detail}")
+
+
+def _fetch_static_ffmpeg_binaries() -> tuple[str, str]:
+    from static_ffmpeg.run import (
+        _get_or_fetch_platform_executables_else_raise_no_lock,
+        get_platform_key,
+    )
+
+    cache_root = _writable_static_ffmpeg_root()
+    bin_dir = cache_root / "bin" / get_platform_key()
+    lock_file = cache_root / "fetch.lock"
+    with FileLock(str(lock_file), timeout=600):
+        return _get_or_fetch_platform_executables_else_raise_no_lock(
+            download_dir=str(bin_dir)
+        )
+
+
 def _resolve_ffmpeg_binaries() -> tuple[str, str]:
     global _ffmpeg_exe, _ffprobe_exe
     if _ffmpeg_exe and _ffprobe_exe:
@@ -134,9 +180,7 @@ def _resolve_ffmpeg_binaries() -> tuple[str, str]:
         _ffmpeg_exe, _ffprobe_exe = ffmpeg, ffprobe
         return ffmpeg, ffprobe
 
-    from static_ffmpeg import run
-
-    ffmpeg, ffprobe = run.get_or_fetch_platform_executables_else_raise()
+    ffmpeg, ffprobe = _fetch_static_ffmpeg_binaries()
     _ffmpeg_exe, _ffprobe_exe = ffmpeg, ffprobe
     return ffmpeg, ffprobe
 
@@ -187,7 +231,8 @@ def check_ffmpeg_available() -> tuple[bool, str]:
     except Exception as exc:
         return False, (
             "FFmpeg is not available. Install FFmpeg locally "
-            "(e.g. `brew install ffmpeg`) or ensure `static-ffmpeg` is installed."
+            "(e.g. `brew install ffmpeg`) or ensure `static-ffmpeg` can download "
+            "to a writable cache directory."
             f" ({exc})"
         )
     for label, binary_path in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe)):

@@ -59,7 +59,7 @@ from theme.airbus import (
     render_config_tape,
     render_convert_blink_css,
     render_download_ready_banner,
-    render_download_ready_css,
+    render_download_ready_glow,
     render_estimate_panel,
     render_converting_strip,
     render_main_telemetry,
@@ -151,6 +151,7 @@ def init_batch_state() -> None:
         "grid_filter": "all",
         "clear_after_download": False,
         "download_ready": False,
+        "download_scroll_pending": False,
         "grid_view_mode": "list",
         "grid_density": "comfort",
         "sq_lossless": False,
@@ -801,6 +802,7 @@ def zip_download_name() -> str:
 
 def on_zip_download() -> None:
     st.session_state.download_ready = False
+    st.session_state.download_scroll_pending = False
     if st.session_state.clear_after_download:
         clear_all_files()
 
@@ -2982,6 +2984,7 @@ def run_conversion(
     }
     st.session_state.excluded_zip_ids = set()
     st.session_state.download_ready = True
+    st.session_state.download_scroll_pending = True
     st.rerun()
 
 
@@ -3497,7 +3500,8 @@ if st.session_state.get("convert_armed"):
     render_convert_blink_css(True)
 
 if download_ready_flag and can_download:
-    render_download_ready_css()
+    scroll_pending = bool(st.session_state.pop("download_scroll_pending", False))
+    render_download_ready_glow(scroll_into_view=scroll_pending)
 
 if st.session_state.get("mp4_dialog_open"):
     show_mp4_compress_dialog()
