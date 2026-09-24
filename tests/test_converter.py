@@ -6,7 +6,7 @@ import io
 
 from PIL import Image
 
-from converter import EncodeOptions, OUTPUT_FORMAT_PNG, convert_image
+from converter import EncodeOptions, OUTPUT_FORMAT_JPEG, OUTPUT_FORMAT_PNG, convert_image
 
 
 def _rgb_image(width: int, height: int) -> bytes:
@@ -32,4 +32,26 @@ def test_convert_image_png_only() -> None:
 
     with Image.open(io.BytesIO(result.png_data)) as image:
         assert image.format == "PNG"
+        assert image.size == (200, 100)
+
+
+def test_convert_image_jpeg_only() -> None:
+    data = _rgb_image(200, 100)
+    result = convert_image(
+        data,
+        "photo.jpg",
+        quality=85,
+        encode_options=EncodeOptions.from_output_format(OUTPUT_FORMAT_JPEG),
+    )
+
+    assert result.success
+    assert result.jpeg_data
+    assert result.jpeg_name.endswith("_jpeg_200x100.jpg")
+    assert not result.webp_data
+    assert not result.avif_data
+    assert not result.png_data
+    assert result.quality_used == 85
+
+    with Image.open(io.BytesIO(result.jpeg_data)) as image:
+        assert image.format == "JPEG"
         assert image.size == (200, 100)
