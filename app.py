@@ -60,8 +60,6 @@ from theme.airbus import (
     render_convert_blink_css,
     render_download_ready_banner,
     render_download_ready_css,
-    render_drop_bay_header,
-    render_empty_state,
     render_estimate_panel,
     render_converting_strip,
     render_main_telemetry,
@@ -3378,7 +3376,7 @@ render_config_tape(
     dirty=settings_dirty,
 )
 
-render_drop_bay_header(compact=bool(preview_files), file_count=len(preview_files))
+st.markdown('<div class="upload-section-anchor"></div>', unsafe_allow_html=True)
 new_uploads = st.file_uploader(
     "Upload images or ZIP",
     type=None,
@@ -3386,11 +3384,17 @@ new_uploads = st.file_uploader(
     label_visibility="collapsed",
     key=f"uploader_{st.session_state.uploader_key}",
 )
-if not preview_files:
-    st.markdown(
-        '<p class="upload-hint">Drag images or a ZIP · folder paths preserved · up to 100 files</p>',
-        unsafe_allow_html=True,
+if preview_files:
+    upload_hint = (
+        f"{len(preview_files)} file{'s' if len(preview_files) != 1 else ''} loaded · "
+        f"add more images or ZIP · up to {MAX_FILES} total"
     )
+else:
+    upload_hint = (
+        f"JPEG, PNG, GIF, WebP, HEIC, TIFF, BMP, or ZIP · "
+        f"folder paths preserved · up to {MAX_FILES} files"
+    )
+st.markdown(f'<p class="upload-hint">{html.escape(upload_hint)}</p>', unsafe_allow_html=True)
 
 duplicate_count = 0
 if new_uploads:
@@ -3485,11 +3489,6 @@ if preview_files and not (convert_clicked and can_convert):
             target_kb=target_kb,
             has_results=has_results,
         )
-elif not preview_files:
-    with grid_slot.container():
-        st.markdown('<div class="grid-panel-anchor"></div>', unsafe_allow_html=True)
-        render_empty_state()
-
 if st.session_state.get("convert_armed"):
     render_convert_blink_css(True)
 

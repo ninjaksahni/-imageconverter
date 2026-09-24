@@ -1194,40 +1194,10 @@ div[data-testid="stVerticalBlock"]:has(.bulk-bar-anchor) ~ [data-testid="stHoriz
     border-left: 3px solid {AMBER};
 }}
 
-/* Drop bay */
-.drop-bay-anchor {{ display: none; }}
-.drop-bay-header {{
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.12em; color: {CYAN};
-    margin: 0 0 0.35rem 0;
-}}
-.drop-bay-copy {{
-    font-family: 'Inter', sans-serif; font-size: 0.74rem; color: {TEXT_MUTED};
-    margin: 0 0 0.5rem 0; line-height: 1.45;
-}}
-.drop-bay-compact-line {{
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 600;
-    color: {TEXT_MUTED}; letter-spacing: 0.06em; margin-bottom: 0.35rem;
-}}
-.drop-bay-compact-line strong {{ color: {GREEN}; }}
-.drop-bay-chips {{
-    display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.55rem;
-}}
-.drop-bay-chip {{
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.54rem; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.06em; color: {CYAN};
-    border: 1px solid {BORDER}; border-radius: 2px; padding: 0.15rem 0.4rem;
-    background: {BG_DEEP};
-}}
-[data-testid="stVerticalBlock"]:has(.drop-bay-anchor) [data-testid="stFileUploader"] section {{
-    border-style: dashed !important; min-height: 128px !important;
-}}
-[data-testid="stVerticalBlock"]:has(.drop-bay-compact) [data-testid="stFileUploader"] section {{
-    min-height: 76px !important; padding: 0.85rem 1rem !important;
-}}
-[data-testid="stVerticalBlock"]:has(.drop-bay-anchor) [data-testid="stFileUploader"] section:hover {{
+/* Upload section */
+.upload-section-anchor {{ display: none; }}
+[data-testid="stVerticalBlock"]:has(.upload-section-anchor) [data-testid="stFileUploader"] section:hover {{
     border-color: {CYAN} !important;
-    box-shadow: 0 0 12px rgba(0, 212, 255, 0.12) !important;
 }}
 
 /* Main telemetry strip */
@@ -1452,32 +1422,6 @@ def render_download_ready_css() -> None:
     )
 
 
-def render_empty_state() -> None:
-    st.markdown(
-        f"""
-        <div class="empty-state">
-            <div class="empty-state-icon">⬆</div>
-            <div class="empty-state-title">Preflight</div>
-            <div class="empty-state-copy">
-                Drop images in the bay above, adjust settings in the ECAM panel, then run convert.
-            </div>
-            <div class="empty-steps">
-                <span class="empty-step active-step">1 · Upload</span>
-                <span class="empty-step">2 · Convert</span>
-                <span class="empty-step">3 · Download</span>
-            </div>
-            <div class="empty-formats">
-                JPEG · PNG · GIF · WebP · HEIC · TIFF · BMP · ICO
-            </div>
-            <div class="empty-preflight-hint">
-                Adjust output in <strong>ECAM panel ←</strong> · Video via <strong>Compress MP4</strong>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def render_converting_strip(*, completed: int, total: int, eta_text: str) -> None:
     st.markdown(
         f"""
@@ -1586,30 +1530,6 @@ def render_config_tape(line: str, *, dirty: bool = False) -> None:
         f'<div class="config-tape{dirty_cls}">{html.escape(line)}</div>',
         unsafe_allow_html=True,
     )
-
-
-def render_drop_bay_header(*, compact: bool, file_count: int) -> None:
-    compact_cls = " drop-bay-compact" if compact else ""
-    st.markdown(f'<div class="drop-bay-anchor{compact_cls}"></div>', unsafe_allow_html=True)
-    if compact:
-        st.markdown(
-            f'<div class="drop-bay-compact-line">'
-            f"<strong>{file_count}</strong> file{'s' if file_count != 1 else ''} loaded · "
-            f"+ Add more images or ZIP"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        return
-    st.markdown('<div class="drop-bay-header">Drop Bay</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="drop-bay-copy">'
-        "Upload individual images or a ZIP archive. Folder paths are preserved in the output ZIP."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    chips = ("JPEG", "PNG", "GIF", "WEBP", "HEIC", "TIFF", "BMP", "ZIP")
-    chip_html = "".join(f'<span class="drop-bay-chip">{c}</span>' for c in chips)
-    st.markdown(f'<div class="drop-bay-chips">{chip_html}</div>', unsafe_allow_html=True)
 
 
 def render_main_telemetry(
